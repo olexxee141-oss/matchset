@@ -65,6 +65,8 @@ export default function App() {
   const [communityName, setCommunityName] = useState('');
   const [creatorName, setCreatorName] = useState('');
   const [joinCode, setJoinCode] = useState('');
+  const [communityTab, setCommunityTab] = useState<'overview' | 'matches' | 'create-match'>('overview');
+  const [communityMenuOpen, setCommunityMenuOpen] = useState(false);
   const [newMemberName, setNewMemberName] = useState('');
   const [currentMemberId, setCurrentMemberId] = useState('');
   const [ownerToken, setOwnerToken] = useState('');
@@ -174,13 +176,7 @@ export default function App() {
     event.preventDefault(); setError('');
     const slug = extractCode(joinCode, 'community');
     if (!slug) { setError('Enter a valid community invite link or code.'); return; }
-    setLoading(true);
-    try {
-      const result = await api<{ member: Member }>(`/api/communities/${slug}/members`, { method: 'POST', body: JSON.stringify({ name: joinName }) });
-      localStorage.setItem(`matchset-member:${slug}`, result.member.id);
-      await loadCommunity(slug, true);
-    } catch (e) { setError(e instanceof Error ? e.message : 'Could not join community.'); }
-    finally { setLoading(false); }
+    await loadCommunity(slug, true);
   }
 
   async function addMember(event: FormEvent) {
@@ -279,12 +275,11 @@ export default function App() {
     {page === 'join-community' && <section className="workspace">
       <button className="back" onClick={openHome}>← Back</button>
       <div className="section-kicker">JOIN A COMMUNITY</div><h1 className="page-title">Find your <em>people.</em></h1>
-      <p className="subcopy">Enter the invite code and the player name your group knows you by.</p>
+      <p className="subcopy">Enter an invite link or code to view the community. The creator manages its roster.</p>
       <form className="form-card" onSubmit={joinCommunity}>
         <label className="field-label">COMMUNITY INVITE LINK OR CODE<input value={joinCode} onChange={(e) => setJoinCode(e.target.value)} placeholder="Paste invite link or code" required /></label>
-        <label className="field-label">YOUR PLAYER NAME<input value={joinName} onChange={(e) => setJoinName(e.target.value)} placeholder="e.g. Alex" maxLength={40} required /></label>
-        <p className="hint">Names are unique within each community. This first version uses display names, not verified accounts.</p>
-        <button className="primary-btn submit-button" disabled={loading}>{loading ? 'Joining…' : 'Join community'} <span>↗</span></button>
+        <p className="hint">Invite links are read-only. Only the community creator can add players or manage matches.</p>
+        <button className="primary-btn submit-button" disabled={loading}>{loading ? 'Opening…' : 'View community'} <span>↗</span></button>
       </form>
       {error && <p className="error">{error}</p>}
     </section>}
