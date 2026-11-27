@@ -65,7 +65,8 @@ export default function App() {
   const [communityName, setCommunityName] = useState('');
   const [creatorName, setCreatorName] = useState('');
   const [joinCode, setJoinCode] = useState('');
-  const [joinName, setJoinName] = useState('');
+  const [communityTab, setCommunityTab] = useState<'overview' | 'matches' | 'create-match'>('overview');
+  const [communityMenuOpen, setCommunityMenuOpen] = useState(false);
   const [newMemberName, setNewMemberName] = useState('');
   const [currentMemberId, setCurrentMemberId] = useState('');
   const [ownerToken, setOwnerToken] = useState('');
@@ -121,6 +122,8 @@ export default function App() {
       setCurrentMemberId(localStorage.getItem(`matchset-member:${slug}`) || '');
       setOwnerToken(localStorage.getItem(`matchset-community-owner:${slug}`) || '');
       setSelectedMemberIds(result.members.map((member) => member.id));
+      setCommunityTab('overview');
+      setCommunityMenuOpen(false);
       setPage('community');
       if (updateUrl) window.history.pushState({}, '', `/community/${slug}`);
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not open this community.'); }
@@ -173,13 +176,7 @@ export default function App() {
     event.preventDefault(); setError('');
     const slug = extractCode(joinCode, 'community');
     if (!slug) { setError('Enter a valid community invite link or code.'); return; }
-    setLoading(true);
-    try {
-      const result = await api<{ member: Member }>(`/api/communities/${slug}/members`, { method: 'POST', body: JSON.stringify({ name: joinName }) });
-      localStorage.setItem(`matchset-member:${slug}`, result.member.id);
-      await loadCommunity(slug, true);
-    } catch (e) { setError(e instanceof Error ? e.message : 'Could not join community.'); }
-    finally { setLoading(false); }
+    await loadCommunity(slug, true);
   }
 
   async function addMember(event: FormEvent) {
@@ -187,7 +184,7 @@ export default function App() {
     if (!community) return;
     setError(''); setLoading(true);
     try {
-      await api<{ member: Member }>(`/api/communities/${community.slug}/members`, { method: 'POST', body: JSON.stringify({ name: newMemberName }) });
+      await api<{ member: Member }>(`/api/communities/${community.slug}/members`, { method: 'POST', body: JSON.stringify({ name: newMemberName, ownerToken }) });
       setNewMemberName('');
       await loadCommunity(community.slug);
       setNotice('Player added to the community roster.');
@@ -214,6 +211,7 @@ export default function App() {
       localStorage.setItem(`matchset-result:${result.match.id}`, result.resultToken);
       setMatchTitle('');
       await loadCommunity(community.slug);
+      setCommunityTab('matches');
       setNotice('Teams created and saved to community history.');
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not create match.'); }
     finally { setLoading(false); }
@@ -252,7 +250,7 @@ export default function App() {
       <p className="intro">Put players into balanced teams, keep a record of every match, and see who wins most in your community.</p>
       <div className="choices">
         <button className="choice create-choice" onClick={() => { setError(''); setPage('create-community'); }}><span className="choice-icon">＋</span><span><strong>Create a community</strong><small>Start a group and keep its match history.</small></span><span className="arrow">↗</span></button>
-        <button className="choice view-choice" onClick={() => { setError(''); setPage('join-community'); }}><span className="choice-icon">⌕</span><span><strong>Join a community</strong><small>Use an invite link or community code.</small></span><span className="arrow">↗</span></button>
+        <button className="choice view-choice" onClick={() => { setError(''); setPage('join-community'); }}><span className="choice-icon">⌕</span><span><strong>View a community</strong><small>Open an invite link or community code.</small></span><span className="arrow">↗</span></button>
         <button className="choice view-choice" onClick={startCreate}><span className="choice-icon">▦</span><span><strong>Quick arrangement</strong><small>Create a standalone shareable set.</small></span><span className="arrow">↗</span></button>
         <button className="choice view-choice" onClick={() => { setShowViewInput((value) => !value); setError(''); }}><span className="choice-icon">↗</span><span><strong>View a set</strong><small>Open a standalone arrangement link.</small></span><span className="arrow">↗</span></button>
       </div>
@@ -277,29 +275,38 @@ export default function App() {
     {page === 'join-community' && <section className="workspace">
       <button className="back" onClick={openHome}>← Back</button>
       <div className="section-kicker">JOIN A COMMUNITY</div><h1 className="page-title">Find your <em>people.</em></h1>
-      <p className="subcopy">Enter the invite code and the player name your group knows you by.</p>
+      <p className="subcopy">Enter an invite link or code to view the community. The creator manages its roster.</p>
       <form className="form-card" onSubmit={joinCommunity}>
         <label className="field-label">COMMUNITY INVITE LINK OR CODE<input value={joinCode} onChange={(e) => setJoinCode(e.target.value)} placeholder="Paste invite link or code" required /></label>
-        <label className="field-label">YOUR PLAYER NAME<input value={joinName} onChange={(e) => setJoinName(e.target.value)} placeholder="e.g. Alex" maxLength={40} required /></label>
-        <p className="hint">Names are unique within each community. This first version uses display names, not verified accounts.</p>
-        <button className="primary-btn submit-button" disabled={loading}>{loading ? 'Joining…' : 'Join community'} <span>↗</span></button>
+        <p className="hint">Invite links are read-only. Only the community creator can add players or manage matches.</p>
+        <button className="primary-btn submit-button" disabled={loading}>{loading ? 'Opening…' : 'View community'} <span>↗</span></button>
       </form>
       {error && <p className="error">{error}</p>}
     </section>}
 
     {page === 'community' && community && <section className="workspace community-workspace">
-      <button className="back" onClick={openHome}>← Home</button>
       <div className="community-heading">
-        <div><div className="section-kicker">COMMUNITY / {members.length} PLAYERS</div><h1 className="page-title">{community.name}</h1><p className="subcopy">Shared roster, match history and team leaderboard.</p></div>
-        <div className="community-heading-actions">{!currentMemberId && <button className="share-btn" onClick={() => { setJoinCode(window.location.href); setPage('join-community'); }}>Join this community</button>}<button className="share-btn" onClick={() => copyText(`${window.location.origin}/community/${community.slug}`, 'Community invite link copied.')}>↗ Invite players</button></div>
+        <div><div className="section-kicker">COMMUNITY / {members.length} PLAYERS</div><h1 className="page-title">{community.name}</h1><p className="subcopy">Community standings, roster and match history.</p></div>
+        <div className="community-menu-wrap">
+          <button className="menu-toggle" aria-label="Open community menu" aria-expanded={communityMenuOpen} onClick={() => setCommunityMenuOpen((value) => !value)}><span></span><span></span><span></span></button>
+          {communityMenuOpen && <div className="community-menu">
+            <button onClick={() => { void copyText(window.location.origin + '/community/' + community.slug, 'Community invite link copied.'); setCommunityMenuOpen(false); }}>↗ Copy invite link</button>
+            {isOwner && <button onClick={() => { setCommunityTab('create-match'); setCommunityMenuOpen(false); }}>＋ Create a match</button>}
+            <button onClick={() => { openHome(); setCommunityMenuOpen(false); }}>⌂ Back to home</button>
+          </div>}
+        </div>
       </div>
       <div className="community-stats">
         <div><strong>{members.length}</strong><span>PLAYERS</span></div>
         <div><strong>{matches.length}</strong><span>MATCHES</span></div>
         <div><strong>{matches.filter((match) => match.winningTeamId !== null).length}</strong><span>RESULTS</span></div>
       </div>
-
-      {isOwner && <div className="community-panel">
+      <nav className="community-tabs" aria-label="Community sections">
+        <button className={communityTab === 'overview' ? 'active' : ''} onClick={() => setCommunityTab('overview')}>Overview</button>
+        <button className={communityTab === 'matches' ? 'active' : ''} onClick={() => setCommunityTab('matches')}>Matches <span>{matches.length}</span></button>
+        {isOwner && <button className={communityTab === 'create-match' ? 'active' : ''} onClick={() => setCommunityTab('create-match')}>Create match <span>＋</span></button>}
+      </nav>
+      {communityTab === 'create-match' && isOwner && <div className="community-panel">
         <div className="panel-heading"><div><span className="section-kicker">ORGANISER TOOLS</span><h2>Create a match</h2></div></div>
         <form className="community-form" onSubmit={createCommunityMatch}>
           <label className="field-label">MATCH NAME<input value={matchTitle} onChange={(e) => setMatchTitle(e.target.value)} placeholder="e.g. Saturday evening games" maxLength={80} required /></label>
@@ -310,8 +317,7 @@ export default function App() {
           <button className="primary-btn submit-button" disabled={loading || Math.ceil(selectedMemberIds.length / playersPerTeam) < 2}>{loading ? 'Saving…' : 'Create teams'} <span>↗</span></button>
         </form>
       </div>}
-
-      <div className="community-columns">
+      {communityTab === 'overview' && <div className="community-columns">
         <section className="community-panel">
           <div className="panel-heading"><div><span className="section-kicker">ALL-TIME</span><h2>Leaderboard</h2></div></div>
           {leaderboard.length === 0 ? <p className="empty-state">No results yet. Record a match winner to start the leaderboard.</p> : <div className="leaderboard">
@@ -321,27 +327,26 @@ export default function App() {
         </section>
         <section className="community-panel">
           <div className="panel-heading"><div><span className="section-kicker">ROSTER</span><h2>Players</h2></div><span className="count">{members.length} MEMBERS</span></div>
-          <div className="member-list">{members.map((member) => <div className="member-item" key={member.id}><span className="member-avatar">{member.name.slice(0,1).toUpperCase()}</span>{member.name}{member.id === currentMemberId && <span className="you-label">YOU</span>}</div>)}</div>
-          <form className="add-member-form" onSubmit={addMember}><input value={newMemberName} onChange={(e) => setNewMemberName(e.target.value)} placeholder="Add a player to the roster" maxLength={40} required /><button className="share-btn" disabled={loading}>Add</button></form>
+          <div className="member-list">{members.map((member) => <div className="member-item" key={member.id}><span className="member-avatar">{member.name.slice(0,1).toUpperCase()}</span>{member.name}{member.id === currentMemberId && <span className="you-label">CREATOR</span>}</div>)}</div>
+          {isOwner && <form className="add-member-form" onSubmit={addMember}><input value={newMemberName} onChange={(e) => setNewMemberName(e.target.value)} placeholder="Add a player to the roster" maxLength={40} required /><button className="share-btn" disabled={loading}>Add player</button></form>}
+          {!isOwner && <p className="read-only-note">Roster managed by the community creator.</p>}
         </section>
-      </div>
-
-      <section className="community-panel history-panel">
+      </div>}
+      {communityTab === 'matches' && <section className="community-panel history-panel">
         <div className="panel-heading"><div><span className="section-kicker">COMMUNITY RECORD</span><h2>Match history</h2></div><span className="count">LATEST 100</span></div>
-        {matches.length === 0 ? <p className="empty-state">No matches yet. The organiser can create the first one above.</p> : <div className="match-history">
+        {matches.length === 0 ? <p className="empty-state">No matches yet. The community creator can create the first one.</p> : <div className="match-history">
           {matches.map((match) => {
-            const resultToken = localStorage.getItem(`matchset-result:${match.id}`) || '';
+            const resultToken = localStorage.getItem('matchset-result:' + match.id) || '';
             return <article className="history-match" key={match.id}>
-              <div className="history-match-head"><div><h3>{match.title}</h3><span>{new Date(match.createdAt).toLocaleDateString()} · {match.teams.length} teams</span></div><span className={match.winningTeamId ? 'result-status complete' : 'result-status'}>{match.winningTeamId ? `TEAM ${match.winningTeamId} WON` : 'AWAITING RESULT'}</span></div>
-              <div className="history-teams">{match.teams.map((team) => <div className={match.winningTeamId === team.id ? 'history-team winner' : 'history-team'} key={team.id}><div><b>TEAM {team.id}</b>{match.winningTeamId === team.id && <span>WINNER</span>}</div><p>{team.players.map((player) => player.name).join(' · ')}</p>{!match.winningTeamId && resultToken && <button className="record-win-btn" onClick={() => void recordWinner(match, team.id)} disabled={loading}>Record as winner</button>}</div>)}</div>
-              {!match.winningTeamId && !resultToken && <p className="hint">The match organiser can record the winning team from the device used to create this match.</p>}
+              <div className="history-match-head"><div><h3>{match.title}</h3><span>{new Date(match.createdAt).toLocaleDateString()} · {match.teams.length} teams</span></div><span className={match.winningTeamId ? 'result-status complete' : 'result-status'}>{match.winningTeamId ? 'TEAM ' + match.winningTeamId + ' WON' : 'AWAITING RESULT'}</span></div>
+              <div className="history-teams">{match.teams.map((team) => <div className={match.winningTeamId === team.id ? 'history-team winner' : 'history-team'} key={team.id}><div><b>TEAM {team.id}</b>{match.winningTeamId === team.id && <span>WINNER</span>}</div><p>{team.players.map((player) => player.name).join(' · ')}</p>{isOwner && !match.winningTeamId && resultToken && <button className="record-win-btn" onClick={() => void recordWinner(match, team.id)} disabled={loading}>Record as winner</button>}</div>)}</div>
+              {isOwner && !match.winningTeamId && !resultToken && <p className="hint">The creator can record the result from the device used to create this match.</p>}
             </article>;
           })}
         </div>}
-      </section>
-      {!currentMemberId && <p className="hint">You are viewing this community without joining. Use the invite flow to add your player name.</p>}
+      </section>}
+      {!isOwner && <p className="read-only-note">You are viewing this community in read-only mode. The creator manages its roster and matches.</p>}
     </section>}
-
     {page === 'create' && <section className="workspace">
       <button className="back" onClick={openHome}>← Back</button>
       <div className="section-kicker">{editing ? 'EDIT ARRANGEMENT / 02' : 'NEW ARRANGEMENT / 01'}</div><h1 className="page-title">{editing ? 'Update your' : 'Create your'} <em>set.</em></h1>
