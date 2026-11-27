@@ -3,7 +3,7 @@ import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import { Pool } from 'pg';
-import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { distributePlayers } from '../src/shared/distribute.js';
 
@@ -39,7 +39,7 @@ async function initializeDatabase() {
 }
 
 function hashToken(token: string) {
-  return Buffer.from(token).toString('hex');
+  return createHash('sha256').update(token).digest('hex');
 }
 function tokenMatches(token: string, stored: string) {
   const candidate = Buffer.from(hashToken(token));
@@ -65,7 +65,7 @@ app.post('/api/sessions', async (req, res, next) => {
     const input = inputSchema.parse(req.body);
     const uniqueNames = input.players.map((name) => name.trim()).filter(Boolean);
     if (uniqueNames.length !== input.players.length) return res.status(400).json({ error: 'Player names cannot be empty.' });
-    const slug = randomBytes(6).toString('base64url');
+    const slug = randomBytes(9).toString('base64url');
     const editToken = randomBytes(32).toString('base64url');
     const sets = distributePlayers(uniqueNames, input.playersPerSet);
     const result = await pool.query(
@@ -112,8 +112,8 @@ if (process.env.NODE_ENV === 'production') {
   const { default: path } = await import('node:path');
   const { fileURLToPath } = await import('node:url');
   const root = path.dirname(fileURLToPath(import.meta.url));
-  app.use(express.static(path.resolve(root, '../dist')));
-  app.get('*', (_req, res) => res.sendFile(path.resolve(root, '../dist/index.html')));
+  app.use(express.static(path.resolve(root, '../../dist')));
+  app.get('*', (_req, res) => res.sendFile(path.resolve(root, '../../dist/index.html')));
 }
 
 initializeDatabase().then(() => {
