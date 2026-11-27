@@ -10,9 +10,11 @@
     "build": "tsc -p tsconfig.server.json && vite build",
     "start": "node dist-server/server/index.js",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.server.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "neon:deploy": "neon deploy"
   },
   "dependencies": {
+    "@neon/config": "^1.13.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",

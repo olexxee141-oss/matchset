@@ -1,4 +1,5 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+import { existsSync } from 'node:fs';
 import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
@@ -7,9 +8,17 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypt
 import { z } from 'zod';
 import { distributePlayers } from '../src/shared/distribute.js';
 
+// Neon CLI writes .env when it already exists, otherwise .env.local.
+dotenv.config({ path: existsSync('.env') ? '.env' : '.env.local' });
+
 const app = express();
 const port = Number(process.env.PORT || 4000);
-const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined });
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: 10,
+  idleTimeoutMillis: 30_000,
+  connectionTimeoutMillis: 5_000,
+});
 
 app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(cors());
@@ -30,7 +39,7 @@ async function initializeDatabase() {
       edit_token_hash TEXT NOT NULL,
       name TEXT NOT NULL,
       players JSONB NOT NULL,
-      players_per_set INTEGER NOT NULL,
+      players_per_set INTEGER NOT NULL CHECK (players_per_set BETWEEN 2 AND 20),
       sets JSONB NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -58,7 +67,12 @@ function publicSession(row: any) {
   };
 }
 
-app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
+app.get('/api/health', async (_req, res, next) => {
+  try {
+    await pool.query('SELECT 1');
+    res.json({ status: 'ok', database: 'connected' });
+  } catch (error) { next(error); }
+});
 
 app.post('/api/sessions', async (req, res, next) => {
   try {
