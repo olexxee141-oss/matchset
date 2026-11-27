@@ -18,4 +18,4 @@
     "server/**/*.ts",
     "src/shared/**/*.ts"
   ]
-}\n
+}
