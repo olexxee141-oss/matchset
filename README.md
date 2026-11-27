@@ -58,15 +58,32 @@ Postgres is built into every Neon project. `neon.ts` intentionally declares no a
 
 Local development initializes the tables and indexes when the API starts. Production schema is provisioned in Neon separately; Vercel Functions only verify database connectivity and never run DDL on cold starts. The production schema includes the standalone and community tables.
 
-## Deploy to Vercel
+## Deployment
 
-The repository exports the Express app from the root `index.ts`. Vercel runs it as a Function, while Vite builds the frontend into `public/` so the CDN serves static assets. Client routes for shared sets and communities are rewritten to the SPA shell.
+The frontend and API are deployed separately:
 
-Set this project environment variable in Vercel for **Production**, **Preview**, and **Development**:
+- **Frontend:** Vercel (React + Vite static site).
+- **API:** Render (Express web service).
+- **Database:** Neon PostgreSQL.
 
-- `DATABASE_URL`: Neon pooled PostgreSQL connection string (include SSL mode).
+### Render API environment
 
-Do not set `NODE_ENV` manually on Vercel; the platform sets it for deployments. The local-only `PORT` setting is optional. After adding or changing variables, create a new deployment so the function receives them.
+Configure these on the Render API service:
+
+- `DATABASE_URL`: Neon pooled PostgreSQL connection string (include `sslmode=require`).
+- `FRONTEND_ORIGIN`: the exact deployed frontend origin, e.g. `https://matchset-teal.vercel.app`.
+- `NODE_ENV`: `production` (set by the Render Blueprint).
+- `PORT`: supplied automatically by Render; do not hardcode it.
+
+The API health endpoint is `/api/health`. The Render free service may sleep when idle, so the first request after inactivity can take longer.
+
+### Vercel frontend environment
+
+Configure this variable for **Production**, **Preview**, and **Development**:
+
+- `VITE_API_BASE_URL`: the Render API origin, e.g. `https://matchset-backend.onrender.com` (no trailing slash).
+
+Vite embeds `VITE_*` variables at build time. Redeploy the frontend after adding or changing this variable. Do not put `DATABASE_URL` in the Vercel frontend project.
 
 ## Run locally
 
