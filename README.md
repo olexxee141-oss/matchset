@@ -60,7 +60,7 @@ Local development initializes the tables and indexes when the API starts. Produc
 
 ## Deploy to Vercel
 
-The repository exports the Express app from the root `index.ts`. Vercel runs it as a Function, while Vite builds the frontend into `public/` so the CDN serves static assets. Client routes for shared sets and communities are rewritten to the SPA shell.
+The repository exports the Express app from the root `index.ts`. The Vercel configuration explicitly selects the Express framework so the API is deployed as a Function. Vite builds the React frontend into `dist/`, which is the configured static output directory. Client routes for shared sets and communities are rewritten to the SPA shell.
 
 Set this project environment variable in Vercel for **Production**, **Preview**, and **Development**:
 
