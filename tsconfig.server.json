@@ -9,7 +9,13 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["server/**/*.ts", "src/shared/**/*.ts"]
-}
+  "include": [
+    "index.ts",
+    "server/**/*.ts",
+    "src/shared/**/*.ts"
+  ]
+}\n
