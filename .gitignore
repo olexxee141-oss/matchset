@@ -1,6 +1,7 @@
 node_modules
 dist
 dist-server
+/public/
 .env
 .env.*
 !.env.example
