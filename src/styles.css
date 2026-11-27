@@ -29,3 +29,33 @@
 .read-only-note{font-size:11px;line-height:1.6;color:#879184;margin:14px 0 0}
 .community-workspace .history-panel{margin-top:0}
 @media(max-width:700px){.community-tabs{gap:0;margin-top:21px}.community-tabs button{padding:12px 11px;font-size:11px}.community-columns{grid-template-columns:1fr}.community-menu{right:0}.community-heading{flex-direction:row;align-items:flex-start}.community-heading .page-title{font-size:33px}}
+
+
+/* My Communities, role management and tournament grouping */
+.recent-communities { margin: 2.5rem 0 1.5rem; padding: 1.25rem; border: 1px solid var(--line, #e6e6e6); border-radius: 18px; background: rgba(255,255,255,.7); }
+.recent-community-list { display: grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); gap: .75rem; }
+.recent-community-card { display:flex; align-items:center; gap:.8rem; text-align:left; border:1px solid var(--line,#e6e6e6); border-radius:12px; background:#fff; padding:.85rem; cursor:pointer; color:inherit; }
+.recent-community-card strong,.recent-community-card small { display:block; }
+.recent-community-card small { color:#777; margin-top:.2rem; }
+.recent-community-mark { display:grid; place-items:center; width:38px; height:38px; border-radius:11px; background:#eef1e8; font-weight:800; }
+.recent-community-card .arrow { margin-left:auto; }
+.role-management { margin-top:1.25rem; padding-top:1rem; border-top:1px solid var(--line,#e6e6e6); }
+.role-row { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:.65rem 0; border-bottom:1px solid #eee; }
+.role-row small { display:block; color:#777; font-size:.7rem; letter-spacing:.08em; }
+.admin-invite { margin-top:1rem; padding:1rem; border:1px solid #d8dfcb; border-radius:12px; background:#f8faf5; }
+.admin-invite p { font-size:.85rem; color:#62675c; }
+.admin-invite div { display:flex; gap:.5rem; }
+.admin-invite input { min-width:0; flex:1; }
+.tournament-form { margin:1rem 0 2rem; padding:1rem; border:1px solid var(--line,#e6e6e6); border-radius:14px; }
+.tournament-draft-teams { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:.8rem; margin:1rem 0; }
+.tournament-draft-team { padding:.8rem; border:1px solid #eee; border-radius:12px; }
+.tournament-draft-team select[multiple] { min-height:110px; }
+.tournament-card { margin-top:1.5rem; padding:1rem; border:1px solid var(--line,#e6e6e6); border-radius:14px; }
+.tournament-groups { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:.8rem; }
+.tournament-group { padding:.8rem; border-radius:12px; background:#f7f8f5; }
+.tournament-group h4 { margin:0 0 .7rem; }
+.tournament-team { display:flex; justify-content:space-between; align-items:center; gap:.6rem; padding:.65rem 0; border-top:1px solid #e4e6df; }
+.tournament-team strong,.tournament-team small { display:block; }
+.tournament-team small { margin-top:.25rem; color:#666; font-size:.75rem; }
+.tournament-team select { max-width:105px; }
+@media(max-width:600px) { .admin-invite div,.role-row { align-items:stretch; flex-direction:column; } .tournament-team { align-items:flex-start; flex-direction:column; } .tournament-team select { max-width:100%; width:100%; } }

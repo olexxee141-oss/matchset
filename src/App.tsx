@@ -3,12 +3,16 @@ import type { FormEvent } from 'react';
 
 type SetGroup = { id: number; players: string[] };
 type Session = { id: string; name: string; players: string[]; playersPerSet: number; sets: SetGroup[]; createdAt: string; updatedAt: string };
-type Member = { id: string; name: string; joined_at?: string };
+type Member = { id: string; name: string; joined_at?: string; role?: 'MEMBER' | 'ADMIN' };
+type TournamentTeam = { id: string; name: string; members: Array<{ id: string; name: string }> };
+type TournamentGroup = { id: string; name: string; teams: TournamentTeam[] };
+type Tournament = { id: string; name: string; createdAt: string; groups: TournamentGroup[] };
+type DraftTournamentTeam = { name: string; memberIds: string[] };
 type Team = { id: number; players: Array<{ id: string; name: string }> };
 type CommunityMatch = { id: string; title: string; teams: Team[]; winningTeamId: number | null; createdAt: string; completedAt: string | null };
 type LeaderboardEntry = { memberId: string; name: string; wins: number; losses: number; matchesPlayed: number; winRate: number };
 type Community = { slug: string; name: string; createdAt: string };
-type CommunityPayload = { community: Community; members: Member[]; matches: CommunityMatch[]; leaderboard: LeaderboardEntry[] };
+type CommunityPayload = { community: Community; members: Member[]; matches: CommunityMatch[]; leaderboard: LeaderboardEntry[]; tournaments: Tournament[]; access: { role: 'OWNER' | 'ADMIN' | 'VIEWER' } };
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
 
@@ -62,10 +66,19 @@ export default function App() {
   const [members, setMembers] = useState<Member[]>([]);
   const [matches, setMatches] = useState<CommunityMatch[]>([]);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [tournaments, setTournaments] = useState<Tournament[]>([]);
+  const [communityAccess, setCommunityAccess] = useState<'OWNER' | 'ADMIN' | 'VIEWER'>('VIEWER');
+  const [recentCommunities, setRecentCommunities] = useState<Community[]>(() => {
+    try { return JSON.parse(localStorage.getItem('matchset-recent-communities') || '[]') as Community[]; } catch { return []; }
+  });
+  const [adminInviteLink, setAdminInviteLink] = useState('');
+  const [tournamentName, setTournamentName] = useState('');
+  const [tournamentGroupCount, setTournamentGroupCount] = useState(2);
+  const [tournamentTeams, setTournamentTeams] = useState<DraftTournamentTeam[]>([{ name: 'Team 1', memberIds: [] }, { name: 'Team 2', memberIds: [] }]);
   const [communityName, setCommunityName] = useState('');
   const [creatorName, setCreatorName] = useState('');
   const [joinCode, setJoinCode] = useState('');
-  const [communityTab, setCommunityTab] = useState<'overview' | 'matches' | 'create-match'>('overview');
+  const [communityTab, setCommunityTab] = useState<'overview' | 'matches' | 'create-match' | 'tournaments'>('overview');
   const [communityMenuOpen, setCommunityMenuOpen] = useState(false);
   const [newMemberName, setNewMemberName] = useState('');
   const [currentMemberId, setCurrentMemberId] = useState('');
@@ -76,7 +89,9 @@ export default function App() {
 
   const players = useMemo(() => playerNames.map((item) => item.trim()).filter(Boolean), [playerNames]);
   const projectedSets = players.length >= 2 ? Math.ceil(players.length / playersPerSet) : 0;
-  const isOwner = Boolean(community && ownerToken);
+  const isOwner = communityAccess === 'OWNER';
+  const isAdmin = communityAccess === 'ADMIN';
+  const canManageTournaments = isOwner || isAdmin;
 
   function updatePlayer(index: number, value: string) {
     setPlayerNames((current) => current.map((player, playerIndex) => playerIndex === index ? value : player));
@@ -114,14 +129,35 @@ export default function App() {
   async function loadCommunity(slug: string, updateUrl = false) {
     setLoading(true); setError(''); setNotice('');
     try {
-      const result: CommunityPayload = await api<CommunityPayload>(`/api/communities/${encodeURIComponent(slug)}`);
+      const url = new URL(window.location.href);
+      const invitedAdminToken = url.searchParams.get('adminToken');
+      if (invitedAdminToken) {
+        localStorage.setItem(`matchset-admin:${slug}`, invitedAdminToken);
+        url.searchParams.delete('adminToken');
+        window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+      }
+      const savedOwnerToken = localStorage.getItem(`matchset-community-owner:${slug}`) || '';
+      const savedAdminToken = localStorage.getItem(`matchset-admin:${slug}`) || '';
+      const result: CommunityPayload = await api<CommunityPayload>(`/api/communities/${encodeURIComponent(slug)}`, {
+        headers: {
+          ...(savedOwnerToken ? { 'X-Community-Owner-Token': savedOwnerToken } : {}),
+          ...(savedAdminToken ? { 'X-Community-Admin-Token': savedAdminToken } : {}),
+        },
+      });
       setCommunity(result.community);
       setMembers(result.members);
       setMatches(result.matches);
       setLeaderboard(result.leaderboard);
+      setTournaments(result.tournaments || []);
+      setCommunityAccess(result.access?.role || 'VIEWER');
       setCurrentMemberId(localStorage.getItem(`matchset-member:${slug}`) || '');
-      setOwnerToken(localStorage.getItem(`matchset-community-owner:${slug}`) || '');
+      setOwnerToken(savedOwnerToken);
       setSelectedMemberIds(result.members.map((member) => member.id));
+      setRecentCommunities((current) => {
+        const next = [result.community, ...current.filter((item) => item.slug !== slug)].slice(0, 12);
+        localStorage.setItem('matchset-recent-communities', JSON.stringify(next));
+        return next;
+      });
       setCommunityTab('overview');
       setCommunityMenuOpen(false);
       setPage('community');
@@ -177,6 +213,97 @@ export default function App() {
     const slug = extractCode(joinCode, 'community');
     if (!slug) { setError('Enter a valid community invite link or code.'); return; }
     await loadCommunity(slug, true);
+  }
+
+  function adminHeaders(): Record<string, string> {
+    const token = community ? localStorage.getItem(`matchset-admin:${community.slug}`) || '' : '';
+    const headers: Record<string, string> = {};
+    if (token) headers['X-Community-Admin-Token'] = token;
+    return headers;
+  }
+
+  async function changeMemberRole(member: Member) {
+    if (!community || !ownerToken) return;
+    setError(''); setNotice(''); setAdminInviteLink(''); setLoading(true);
+    try {
+      if (member.role === 'ADMIN') {
+        await api(`/api/communities/${community.slug}/members/${member.id}/admin`, {
+          method: 'DELETE', body: JSON.stringify({ ownerToken }),
+        });
+        await loadCommunity(community.slug);
+        setNotice(`${member.name} is now a regular member.`);
+      } else {
+        const result = await api<{ role: string; adminToken: string }>(`/api/communities/${community.slug}/members/${member.id}/admin`, {
+          method: 'POST', body: JSON.stringify({ ownerToken }),
+        });
+        const invite = `${window.location.origin}/community/${community.slug}?adminToken=${encodeURIComponent(result.adminToken)}`;
+        setAdminInviteLink(invite);
+        await loadCommunity(community.slug);
+        setNotice(`Admin access created for ${member.name}. Share the private admin link with them.`);
+      }
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not update this member role.'); }
+    finally { setLoading(false); }
+  }
+
+  function updateDraftTeam(index: number, patch: Partial<DraftTournamentTeam>) {
+    setTournamentTeams((current) => current.map((team, teamIndex) => teamIndex === index ? { ...team, ...patch } : team));
+  }
+
+  async function createTournament(event: FormEvent) {
+    event.preventDefault();
+    if (!community || !canManageTournaments) return;
+    const teams = tournamentTeams.filter((team) => team.name.trim() && team.memberIds.length >= 2);
+    if (teams.length < 2) { setError('Add at least two teams, with at least two community players per team.'); return; }
+    if (teams.some((team) => team.memberIds.length !== new Set(team.memberIds).size)) { setError('A player cannot appear twice in the same team.'); return; }
+    const allIds = teams.flatMap((team) => team.memberIds);
+    if (new Set(allIds).size !== allIds.length) { setError('Each player can only be assigned to one team in a tournament.'); return; }
+    const count = Math.min(tournamentGroupCount, teams.length);
+    const groups = Array.from({ length: count }, (_, index) => ({
+      name: `Group ${String.fromCharCode(65 + index)}`,
+      teams: [] as Array<{ name: string; memberIds: string[] }>,
+    }));
+    teams.forEach((team, index) => groups[index % count].teams.push({ name: team.name.trim(), memberIds: team.memberIds }));
+    setError(''); setLoading(true);
+    try {
+      await api(`/api/communities/${community.slug}/tournaments`, {
+        method: 'POST',
+        headers: adminHeaders(),
+        body: JSON.stringify({ name: tournamentName, groups, ...(isOwner ? { ownerToken } : {}) }),
+      });
+      setTournamentName('');
+      setTournamentTeams([{ name: 'Team 1', memberIds: [] }, { name: 'Team 2', memberIds: [] }]);
+      await loadCommunity(community.slug);
+      setCommunityTab('tournaments');
+      setNotice('Tournament groups created and saved.');
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not create tournament.'); }
+    finally { setLoading(false); }
+  }
+
+  async function moveTournamentTeam(tournament: Tournament, teamId: string, targetGroupId: string) {
+    if (!community || !canManageTournaments) return;
+    const moving = tournament.groups.flatMap((group) => group.teams.map((team) => ({ ...team, groupId: group.id }))).find((team) => team.id === teamId);
+    if (!moving || moving.groupId === targetGroupId) return;
+    const sourceGroup = tournament.groups.find((group) => group.id === moving.groupId);
+    if (sourceGroup && sourceGroup.teams.length <= 1) { setError('Each tournament group must retain at least one team.'); return; }
+    const groups = tournament.groups.map((group) => ({
+      name: group.name,
+      teams: group.teams.filter((team) => team.id !== teamId).map((team) => ({ name: team.name, memberIds: team.members.map((member) => member.id) })),
+    }));
+    const targetIndex = tournament.groups.findIndex((group) => group.id === targetGroupId);
+    if (targetIndex < 0) return;
+    groups[targetIndex].teams.push({ name: moving.name, memberIds: moving.members.map((member) => member.id) });
+    setError(''); setLoading(true);
+    try {
+      await api(`/api/communities/${community.slug}/tournaments/${tournament.id}/groups`, {
+        method: 'PUT',
+        headers: adminHeaders(),
+        body: JSON.stringify({ groups, ...(isOwner ? { ownerToken } : {}) }),
+      });
+      await loadCommunity(community.slug);
+      setCommunityTab('tournaments');
+      setNotice('Tournament grouping updated.');
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not update tournament groups.'); }
+    finally { setLoading(false); }
   }
 
   async function addMember(event: FormEvent) {
@@ -238,7 +365,7 @@ export default function App() {
   }
   function openHome() {
     window.history.pushState({}, '', '/');
-    setPage('home'); setSession(null); setCommunity(null); setError(''); setNotice(''); setShowViewInput(false);
+    setPage('home'); setSession(null); setCommunity(null); setCommunityAccess('VIEWER'); setRecentCommunities(() => { try { return JSON.parse(localStorage.getItem('matchset-recent-communities') || '[]') as Community[]; } catch { return []; } }); setError(''); setNotice(''); setShowViewInput(false);
   }
 
   return <main className="shell">
@@ -248,6 +375,10 @@ export default function App() {
       <div className="eyebrow"><span className="pulse" /> LESS TIME ORGANISING. MORE TIME PLAYING.</div>
       <h1>Make the lineup.<br /><em>Get into the game.</em></h1>
       <p className="intro">Put players into balanced teams, keep a record of every match, and see who wins most in your community.</p>
+      {recentCommunities.length > 0 && <section className="recent-communities">
+        <div className="panel-heading"><div><span className="section-kicker">SAVED ON THIS DEVICE</span><h2>My communities</h2></div><span className="count">{recentCommunities.length} SAVED</span></div>
+        <div className="recent-community-list">{recentCommunities.map((item) => <button className="recent-community-card" key={item.slug} onClick={() => void loadCommunity(item.slug, true)} disabled={loading}><span className="recent-community-mark">{item.name.slice(0, 1).toUpperCase()}</span><span><strong>{item.name}</strong><small>Open community</small></span><span className="arrow">↗</span></button>)}</div>
+      </section>}
       <div className="choices">
         <button className="choice create-choice" onClick={() => { setError(''); setPage('create-community'); }}><span className="choice-icon">＋</span><span><strong>Create a community</strong><small>Start a group and keep its match history.</small></span><span className="arrow">↗</span></button>
         <button className="choice view-choice" onClick={() => { setError(''); setPage('join-community'); }}><span className="choice-icon">⌕</span><span><strong>View a community</strong><small>Open an invite link or community code.</small></span><span className="arrow">↗</span></button>
@@ -305,6 +436,7 @@ export default function App() {
         <button className={communityTab === 'overview' ? 'active' : ''} onClick={() => setCommunityTab('overview')}>Overview</button>
         <button className={communityTab === 'matches' ? 'active' : ''} onClick={() => setCommunityTab('matches')}>Matches <span>{matches.length}</span></button>
         {isOwner && <button className={communityTab === 'create-match' ? 'active' : ''} onClick={() => setCommunityTab('create-match')}>Create match <span>＋</span></button>}
+        <button className={communityTab === 'tournaments' ? 'active' : ''} onClick={() => setCommunityTab('tournaments')}>Tournaments <span>{tournaments.length}</span></button>
       </nav>
       {communityTab === 'create-match' && isOwner && <div className="community-panel">
         <div className="panel-heading"><div><span className="section-kicker">ORGANISER TOOLS</span><h2>Create a match</h2></div></div>
@@ -329,8 +461,35 @@ export default function App() {
           <div className="panel-heading"><div><span className="section-kicker">ROSTER</span><h2>Players</h2></div><span className="count">{members.length} MEMBERS</span></div>
           <div className="member-list">{members.map((member) => <div className="member-item" key={member.id}><span className="member-avatar">{member.name.slice(0,1).toUpperCase()}</span>{member.name}{member.id === currentMemberId && <span className="you-label">CREATOR</span>}</div>)}</div>
           {isOwner && <form className="add-member-form" onSubmit={addMember}><input value={newMemberName} onChange={(e) => setNewMemberName(e.target.value)} placeholder="Add a player to the roster" maxLength={40} required /><button className="share-btn" disabled={loading}>Add player</button></form>}
-          {!isOwner && <p className="read-only-note">Roster managed by the community creator.</p>}
+          {isOwner && <div className="role-management"><span className="field-label">COMMUNITY ROLES</span>{members.filter((member) => member.id !== currentMemberId).map((member) => <div className="role-row" key={member.id}><span>{member.name}<small>{member.role === 'ADMIN' ? 'ADMIN' : 'MEMBER'}</small></span><button className="text-button" disabled={loading} onClick={() => void changeMemberRole(member)}>{member.role === 'ADMIN' ? 'Remove admin' : 'Make admin'}</button></div>)}</div>}
+          {!isOwner && <p className="read-only-note">Roster and roles are managed by the community owner.</p>}
+          {adminInviteLink && <div className="admin-invite"><strong>Private admin access link</strong><p>Send this link directly to the appointed admin. Anyone with it can manage tournament groups until the owner revokes their role.</p><div><input readOnly value={adminInviteLink} /><button className="share-btn" onClick={() => void copyText(adminInviteLink, 'Admin link copied.')}>Copy link</button></div></div>}
         </section>
+      </div>}
+      {communityTab === 'tournaments' && <div className="community-panel tournament-panel">
+        <div className="panel-heading"><div><span className="section-kicker">COMPETITION MANAGEMENT</span><h2>Tournament groups</h2></div><span className="count">{tournaments.length} TOURNAMENTS</span></div>
+        {canManageTournaments && <form className="community-form tournament-form" onSubmit={createTournament}>
+          <h3>Create tournament</h3>
+          <label className="field-label">TOURNAMENT NAME<input value={tournamentName} onChange={(event) => setTournamentName(event.target.value)} placeholder="e.g. MatchSet Cup" maxLength={80} required /></label>
+          <label className="field-label">NUMBER OF GROUPS<select value={tournamentGroupCount} onChange={(event) => setTournamentGroupCount(Number(event.target.value))}>{[2, 3, 4, 5, 6, 8].map((count) => <option key={count} value={count}>{count} groups</option>)}</select></label>
+          <div className="tournament-draft-teams">{tournamentTeams.map((team, index) => <div className="tournament-draft-team" key={index}>
+            <label className="field-label">TEAM {index + 1}<input value={team.name} onChange={(event) => updateDraftTeam(index, { name: event.target.value })} placeholder={`Team ${index + 1}`} maxLength={40} /></label>
+            <label className="field-label">PLAYERS<select multiple value={team.memberIds} onChange={(event) => updateDraftTeam(index, { memberIds: Array.from(event.currentTarget.selectedOptions, (option) => option.value) })}>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
+            {tournamentTeams.length > 2 && <button type="button" className="text-button" onClick={() => setTournamentTeams((current) => current.filter((_, teamIndex) => teamIndex !== index))}>Remove team</button>}
+          </div>)}</div>
+          <button type="button" className="text-button" onClick={() => setTournamentTeams((current) => [...current, { name: `Team ${current.length + 1}`, memberIds: [] }])}>＋ Add team</button>
+          <p className="hint">Select at least two players per team. Teams are distributed across groups automatically; you can move teams between groups after creation.</p>
+          <button className="primary-btn submit-button" disabled={loading}>{loading ? 'Saving…' : 'Create tournament groups'} <span>↗</span></button>
+        </form>}
+        {tournaments.length === 0 ? <p className="empty-state">No tournaments yet. {canManageTournaments ? 'Create the first tournament above.' : 'An owner or admin can create tournament groups.'}</p> : tournaments.map((tournament) => <section className="tournament-card" key={tournament.id}>
+          <div className="panel-heading"><div><span className="section-kicker">TOURNAMENT</span><h3>{tournament.name}</h3></div><span className="count">{tournament.groups.length} GROUPS</span></div>
+          <div className="tournament-groups">{tournament.groups.map((group) => <div className="tournament-group" key={group.id}>
+            <h4>{group.name}</h4>
+            {group.teams.map((team) => <div className="tournament-team" key={team.id}><span><strong>{team.name}</strong><small>{team.members.map((member) => member.name).join(' · ')}</small></span>
+              {canManageTournaments && <select aria-label={`Move ${team.name} to group`} value={group.id} disabled={loading} onChange={(event) => void moveTournamentTeam(tournament, team.id, event.target.value)}>{tournament.groups.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}</select>}
+            </div>)}
+          </div>)}</div>
+        </section>)}
       </div>}
       {communityTab === 'matches' && <section className="community-panel history-panel">
         <div className="panel-heading"><div><span className="section-kicker">COMMUNITY RECORD</span><h2>Match history</h2></div><span className="count">LATEST 100</span></div>
@@ -345,7 +504,8 @@ export default function App() {
           })}
         </div>}
       </section>}
-      {!isOwner && <p className="read-only-note">You are viewing this community in read-only mode. The creator manages its roster and matches.</p>}
+      {isAdmin && <p className="read-only-note">Admin access: you can create tournaments and manage groupings. The community owner controls members and roles.</p>}
+      {!isOwner && !isAdmin && <p className="read-only-note">You are viewing this community in read-only mode. The creator manages its roster and matches.</p>}
     </section>}
     {page === 'create' && <section className="workspace">
       <button className="back" onClick={openHome}>← Back</button>
