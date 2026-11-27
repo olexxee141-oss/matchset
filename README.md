@@ -56,7 +56,17 @@ Neon CLI pulls `DATABASE_URL` into `.env` if it exists, otherwise `.env.local`. 
 
 Postgres is built into every Neon project. `neon.ts` intentionally declares no additional services: this app does not need Neon Auth, Object Storage, Functions, or the Data API.
 
-The API creates its tables and indexes at startup if they do not exist. Community tables are additive; existing standalone arrangements are preserved.
+Local development initializes the tables and indexes when the API starts. Production schema is provisioned in Neon separately; Vercel Functions only verify database connectivity and never run DDL on cold starts. The production schema includes the standalone and community tables.
+
+## Deploy to Vercel
+
+The repository exports the Express app from the root `index.ts`. Vercel runs it as a Function, while Vite builds the frontend into `public/` so the CDN serves static assets. Client routes for shared sets and communities are rewritten to the SPA shell.
+
+Set this project environment variable in Vercel for **Production**, **Preview**, and **Development**:
+
+- `DATABASE_URL`: Neon pooled PostgreSQL connection string (include SSL mode).
+
+Do not set `NODE_ENV` manually on Vercel; the platform sets it for deployments. The local-only `PORT` setting is optional. After adding or changing variables, create a new deployment so the function receives them.
 
 ## Run locally
 
@@ -76,7 +86,7 @@ npm run build
 npm start
 ```
 
-For a production run, set `NODE_ENV=production` and `PORT` as needed. The Express server serves the built frontend and API from one service.
+For a local production-mode run, set `NODE_ENV=production` and `PORT` as needed. Vercel serves the built frontend from its static CDN and runs the Express API as a Function.
 
 ## PWA
 
