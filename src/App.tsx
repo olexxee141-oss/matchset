@@ -10,10 +10,23 @@ type LeaderboardEntry = { memberId: string; name: string; wins: number; losses: 
 type Community = { slug: string; name: string; createdAt: string };
 type CommunityPayload = { community: Community; members: Member[]; matches: CommunityMatch[]; leaderboard: LeaderboardEntry[] };
 
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\\/+$/, '');
+
 const api = async (url: string, options?: RequestInit) => {
-  const response = await fetch(url, { ...options, headers: { 'Content-Type': 'application/json', ...options?.headers } });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || 'Request failed.');
+  const response = await fetch(`${API_BASE_URL}${url}`, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+  });
+  const body = await response.text();
+  let data: { error?: string } & Record<string, unknown> = {};
+  try {
+    data = body ? JSON.parse(body) : {};
+  } catch {
+    const preview = body.replace(/\\s+/g, ' ').slice(0, 180);
+    const configurationHint = API_BASE_URL ? '' : ' Set VITE_API_BASE_URL in Vercel to https://matchset-backend.onrender.com.';
+    throw new Error(`API returned non-JSON (HTTP ${response.status}).${configurationHint} Response: ${preview || '(empty response)'}`);
+  }
+  if (!response.ok) throw new Error(data.error || `Request failed (HTTP ${response.status}).`);
   return data;
 };
 
