@@ -281,6 +281,8 @@ export default function App() {
     if (!community || !canManageTournaments) return;
     const moving = tournament.groups.flatMap((group) => group.teams.map((team) => ({ ...team, groupId: group.id }))).find((team) => team.id === teamId);
     if (!moving || moving.groupId === targetGroupId) return;
+    const sourceGroup = tournament.groups.find((group) => group.id === moving.groupId);
+    if (sourceGroup && sourceGroup.teams.length <= 1) { setError('Each tournament group must retain at least one team.'); return; }
     const groups = tournament.groups.map((group) => ({
       name: group.name,
       teams: group.teams.filter((team) => team.id !== teamId).map((team) => ({ name: team.name, memberIds: team.members.map((member) => member.id) })),
