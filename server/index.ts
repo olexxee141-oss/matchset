@@ -91,6 +91,18 @@ async function initializeDatabase() {
   `);
 }
 
+const databaseReady = initializeDatabase();
+
+app.use(async (_req, res, next) => {
+  try {
+    await databaseReady;
+    next();
+  } catch (error) {
+    console.error('Database initialization failed:', error);
+    res.status(503).json({ error: 'The database is temporarily unavailable. Please try again.' });
+  }
+});
+
 function hashToken(token: string) {
   return createHash('sha256').update(token).digest('hex');
 }
@@ -291,17 +303,24 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
   return res.status(500).json({ error: 'Something went wrong. Please try again.' });
 });
 
-if (process.env.NODE_ENV === 'production') {
+if (process.env.NODE_ENV === 'production' || process.env.VERCEL) {
   const { default: path } = await import('node:path');
   const { fileURLToPath } = await import('node:url');
   const root = path.dirname(fileURLToPath(import.meta.url));
-  app.use(express.static(path.resolve(root, '../../dist')));
-  app.get('*', (_req, res) => res.sendFile(path.resolve(root, '../../dist/index.html')));
+  const staticRoot = process.env.VERCEL
+    ? path.resolve(process.cwd(), 'public')
+    : path.resolve(root, '../../dist');
+  app.use(express.static(staticRoot));
+  app.get('*', (_req, res) => res.sendFile(path.resolve(staticRoot, 'index.html')));
 }
 
-initializeDatabase().then(() => {
-  app.listen(port, () => console.log(`MatchSet API listening on :${port}`));
-}).catch((error) => {
-  console.error('Could not start MatchSet:', error);
-  process.exit(1);
-});
+if (!process.env.VERCEL) {
+  databaseReady.then(() => {
+    app.listen(port, () => console.log(`MatchSet API listening on :${port}`));
+  }).catch((error) => {
+    console.error('Could not start MatchSet:', error);
+    process.exit(1);
+  });
+}
+
+export default app;
