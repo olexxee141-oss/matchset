@@ -6,8 +6,8 @@ A lightweight PWA for arranging players into balanced teams, sharing links, and 
 
 ### Communities
 - Create a community and receive a private organiser token.
-- Invite players with a public community link or code.
-- Maintain a persistent, community-specific player roster.
+- Share a public, read-only community link with invitees.
+- The creator maintains the persistent, community-specific player roster; invitees cannot add or edit players.
 - Create matches from roster members; teams are balanced automatically.
 - Record one winning team per match.
 - View the latest 100 matches and an all-time leaderboard with wins, losses, matches played, and win rate.
@@ -26,9 +26,10 @@ React + TypeScript + Vite, Express, and Neon PostgreSQL. One deployable app; no 
 
 ## Important MVP limitations
 
-- Community membership uses display names, not verified accounts. A member can join with a name, but identity is not proven. Do not treat this leaderboard as a verified competition record until account authentication is added.
+- The creator enters player display names; these are not verified identities. Do not treat this leaderboard as a verified competition record until account authentication is added.
+- Invite links are read-only. Only the creator's organiser token can add roster members or create matches.
 - The community organiser token and match result tokens are stored in the creator's browser localStorage. Losing that browser storage means losing the corresponding organiser/result permissions.
-- Community invite links are public. Anyone with the link can view the roster/history and join with an unused display name.
+- Community invite links are public. Anyone with the link can view the roster, leaderboard and match history, but cannot modify community data.
 - The organiser creates matches; the device that created each match records its result. Results are immutable after submission in this MVP.
 - Match history displays the latest 100 matches; the leaderboard is calculated across all completed matches.
 
