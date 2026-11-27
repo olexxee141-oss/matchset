@@ -183,7 +183,8 @@ export default function App() {
 
   async function createCommunityMatch(event: FormEvent) {
     event.preventDefault();
-    if (!community || !currentMemberId || !ownerToken) return;
+    if (!community || !ownerToken) return;
+    if (!currentMemberId) { setError('Your organiser player identity is missing. Rejoin this community before creating a match.'); return; }
     const teamCount = Math.ceil(selectedMemberIds.length / playersPerTeam);
     if (teamCount < 2) { setError('Select enough players to create at least two teams.'); return; }
     setError(''); setLoading(true);
@@ -272,7 +273,7 @@ export default function App() {
       <button className="back" onClick={openHome}>← Home</button>
       <div className="community-heading">
         <div><div className="section-kicker">COMMUNITY / {members.length} PLAYERS</div><h1 className="page-title">{community.name}</h1><p className="subcopy">Shared roster, match history and team leaderboard.</p></div>
-        <button className="share-btn" onClick={() => copyText(`${window.location.origin}/community/${community.slug}`, 'Community invite link copied.')}>↗ Invite players</button>
+        <div className="community-heading-actions">{!currentMemberId && <button className="share-btn" onClick={() => { setJoinCode(window.location.href); setPage('join-community'); }}>Join this community</button>}<button className="share-btn" onClick={() => copyText(`${window.location.origin}/community/${community.slug}`, 'Community invite link copied.')}>↗ Invite players</button></div>
       </div>
       <div className="community-stats">
         <div><strong>{members.length}</strong><span>PLAYERS</span></div>
@@ -285,7 +286,7 @@ export default function App() {
         <form className="community-form" onSubmit={createCommunityMatch}>
           <label className="field-label">MATCH NAME<input value={matchTitle} onChange={(e) => setMatchTitle(e.target.value)} placeholder="e.g. Saturday evening games" maxLength={80} required /></label>
           <div className="roster-heading"><span className="field-label">SELECT PLAYERS ({selectedMemberIds.length} SELECTED)</span><button type="button" className="text-button" onClick={() => setSelectedMemberIds(selectedMemberIds.length === members.length ? [] : members.map((member) => member.id))}>{selectedMemberIds.length === members.length ? 'Clear all' : 'Select all'}</button></div>
-          <div className="roster-select">{members.map((member) => <label className="roster-option" key={member.id}><input type="checkbox" checked={selectedMemberIds.includes(member.id)} onChange={() => toggleMember(member.id)} /><span>{member.name}</span></label>)}</div>
+          <div className="roster-select">{members.map((member) => <label className="roster-option" key={member.id}><input type="checkbox" checked={selectedMemberIds.includes(member.id)} onChange={() => toggleMember(member.id)} disabled={member.id === currentMemberId} /><span>{member.name}</span></label>)}</div>
           <div className="form-bottom"><label className="size-label">PLAYERS PER TEAM<select value={playersPerTeam} onChange={(e) => setPlayersPerTeam(Number(e.target.value))}>{Array.from({ length: 19 }, (_, i) => i + 2).map((n) => <option key={n} value={n}>{n} players</option>)}</select></label><span className="count">{Math.ceil(selectedMemberIds.length / playersPerTeam)} TEAMS</span></div>
           <p className="hint">Teams are balanced automatically. A match needs at least two teams. Every selected player is assigned exactly once.</p>
           <button className="primary-btn submit-button" disabled={loading || Math.ceil(selectedMemberIds.length / playersPerTeam) < 2}>{loading ? 'Saving…' : 'Create teams'} <span>↗</span></button>

@@ -36,7 +36,7 @@ const communitySchema = z.object({
 const memberSchema = z.object({ name: z.string().trim().min(2).max(40) });
 const matchSchema = z.object({
   title: z.string().trim().min(2).max(80),
-  memberIds: z.array(z.string().uuid()).min(4).max(100),
+  memberIds: z.array(z.string().uuid()).min(4).max(500),
   playersPerTeam: z.number().int().min(2).max(20),
   createdByMemberId: z.string().uuid(),
   ownerToken: z.string().min(20),
