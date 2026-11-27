@@ -11,9 +11,22 @@ type Community = { slug: string; name: string; createdAt: string };
 type CommunityPayload = { community: Community; members: Member[]; matches: CommunityMatch[]; leaderboard: LeaderboardEntry[] };
 
 const api = async (url: string, options?: RequestInit) => {
-  const response = await fetch(url, { ...options, headers: { 'Content-Type': 'application/json', ...options?.headers } });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || 'Request failed.');
+  const response = await fetch(url, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+  });
+  const responseText = await response.text();
+  let data: any;
+  try {
+    data = responseText ? JSON.parse(responseText) : {};
+  } catch {
+    const contentType = response.headers.get('content-type') || 'unknown content type';
+    const preview = responseText.replace(/\\s+/g, ' ').slice(0, 160);
+    throw new Error(
+      `API returned a non-JSON response (HTTP ${response.status}, ${contentType}). ${preview}`,
+    );
+  }
+  if (!response.ok) throw new Error(data.error || `Request failed (HTTP ${response.status}).`);
   return data;
 };
 
