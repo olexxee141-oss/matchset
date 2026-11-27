@@ -58,6 +58,18 @@ Postgres is built into every Neon project. `neon.ts` intentionally declares no a
 
 The API creates its tables and indexes at startup if they do not exist. Community tables are additive; existing standalone arrangements are preserved.
 
+## Deploy to Vercel
+
+The repository is configured as one Express application on Vercel, with the Vite build emitted into `public/` for CDN delivery.
+
+1. Import this GitHub repository into Vercel with the repository root as the project root.
+2. Use the Express framework preset (or allow Vercel to detect the root `index.ts` entry point).
+3. Set the build command to `npm run build`.
+4. Add `DATABASE_URL` as a Vercel environment variable for Production and Preview. Use the Neon **pooled** connection string for the production branch; do not paste it into Git or chat.
+5. Deploy. The `/api/health` endpoint should return `{ "status": "ok", "database": "connected" }` when the function can reach Neon.
+
+Vercel serves files from `public/` through its CDN. The Express function handles API routes and client-side deep links. Database initialization is awaited before a request is handled; the function does not start a persistent `app.listen()` server on Vercel.
+
 ## Run locally
 
 ```bash
