@@ -10,11 +10,29 @@ type LeaderboardEntry = { memberId: string; name: string; wins: number; losses: 
 type Community = { slug: string; name: string; createdAt: string };
 type CommunityPayload = { community: Community; members: Member[]; matches: CommunityMatch[]; leaderboard: LeaderboardEntry[] };
 
-const api = async (url: string, options?: RequestInit) => {
-  const response = await fetch(url, { ...options, headers: { 'Content-Type': 'application/json', ...options?.headers } });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || 'Request failed.');
-  return data;
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
+
+const api = async <T,>(url: string, options?: RequestInit): Promise<T> => {
+  const response = await fetch(`${API_BASE_URL}${url}`, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+  });
+  const body = await response.text();
+  let data: unknown;
+  try {
+    data = body ? JSON.parse(body) : {};
+  } catch {
+    const preview = body.replace(/\s+/g, ' ').slice(0, 180);
+    const configurationHint = API_BASE_URL ? '' : ' Set VITE_API_BASE_URL in Vercel to https://matchset-backend.onrender.com.';
+    throw new Error(`API returned non-JSON (HTTP ${response.status}).${configurationHint} Response: ${preview || '(empty response)'}`);
+  }
+  if (!response.ok) {
+    const message = typeof data === 'object' && data !== null && 'error' in data && typeof data.error === 'string'
+      ? data.error
+      : `Request failed (HTTP ${response.status}).`;
+    throw new Error(message);
+  }
+  return data as T;
 };
 
 function extractCode(value: string, kind: 'set' | 'community') {
@@ -78,7 +96,7 @@ export default function App() {
     if (!slug) { setError('Enter a valid MatchSet link or set code.'); return; }
     setLoading(true);
     try {
-      const result = await api(`/api/sessions/${encodeURIComponent(slug)}`);
+      const result = await api<{ session: Session }>(`/api/sessions/${encodeURIComponent(slug)}`);
       setSession(result.session);
       const token = localStorage.getItem(`matchset-owner:${slug}`) || '';
       setEditToken(token);
@@ -95,7 +113,7 @@ export default function App() {
   async function loadCommunity(slug: string, updateUrl = false) {
     setLoading(true); setError(''); setNotice('');
     try {
-      const result: CommunityPayload = await api(`/api/communities/${encodeURIComponent(slug)}`);
+      const result: CommunityPayload = await api<CommunityPayload>(`/api/communities/${encodeURIComponent(slug)}`);
       setCommunity(result.community);
       setMembers(result.members);
       setMatches(result.matches);
@@ -127,10 +145,10 @@ export default function App() {
     setLoading(true);
     try {
       if (editing && session && editToken) {
-        const result = await api(`/api/sessions/${session.id}`, { method: 'PUT', body: JSON.stringify({ name, players, playersPerSet, editToken }) });
+        const result = await api<{ session: Session }>(`/api/sessions/${session.id}`, { method: 'PUT', body: JSON.stringify({ name, players, playersPerSet, editToken }) });
         setSession(result.session); setEditing(false); setPage('view'); setNotice('Arrangement updated.');
       } else {
-        const result = await api('/api/sessions', { method: 'POST', body: JSON.stringify({ name, players, playersPerSet }) });
+        const result = await api<{ session: Session; editToken: string }>('/api/sessions', { method: 'POST', body: JSON.stringify({ name, players, playersPerSet }) });
         setSession(result.session); setEditToken(result.editToken);
         localStorage.setItem(`matchset-owner:${result.session.id}`, result.editToken);
         window.history.pushState({}, '', `/set/${result.session.id}`);
@@ -143,7 +161,7 @@ export default function App() {
   async function createCommunity(event: FormEvent) {
     event.preventDefault(); setError(''); setLoading(true);
     try {
-      const result = await api('/api/communities', { method: 'POST', body: JSON.stringify({ name: communityName, creatorName }) });
+      const result = await api<{ community: Community; member: Member; ownerToken: string }>('/api/communities', { method: 'POST', body: JSON.stringify({ name: communityName, creatorName }) });
       localStorage.setItem(`matchset-community-owner:${result.community.slug}`, result.ownerToken);
       localStorage.setItem(`matchset-member:${result.community.slug}`, result.member.id);
       await loadCommunity(result.community.slug, true);
@@ -157,7 +175,7 @@ export default function App() {
     if (!slug) { setError('Enter a valid community invite link or code.'); return; }
     setLoading(true);
     try {
-      const result = await api(`/api/communities/${slug}/members`, { method: 'POST', body: JSON.stringify({ name: joinName }) });
+      const result = await api<{ member: Member }>(`/api/communities/${slug}/members`, { method: 'POST', body: JSON.stringify({ name: joinName }) });
       localStorage.setItem(`matchset-member:${slug}`, result.member.id);
       await loadCommunity(slug, true);
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not join community.'); }
@@ -169,7 +187,7 @@ export default function App() {
     if (!community) return;
     setError(''); setLoading(true);
     try {
-      await api(`/api/communities/${community.slug}/members`, { method: 'POST', body: JSON.stringify({ name: newMemberName }) });
+      await api<{ member: Member }>(`/api/communities/${community.slug}/members`, { method: 'POST', body: JSON.stringify({ name: newMemberName }) });
       setNewMemberName('');
       await loadCommunity(community.slug);
       setNotice('Player added to the community roster.');
@@ -189,7 +207,7 @@ export default function App() {
     if (teamCount < 2) { setError('Select enough players to create at least two teams.'); return; }
     setError(''); setLoading(true);
     try {
-      const result = await api(`/api/communities/${community.slug}/matches`, {
+      const result = await api<{ match: CommunityMatch; resultToken: string }>(`/api/communities/${community.slug}/matches`, {
         method: 'POST',
         body: JSON.stringify({ title: matchTitle, memberIds: selectedMemberIds, playersPerTeam, createdByMemberId: currentMemberId, ownerToken }),
       });
@@ -207,7 +225,7 @@ export default function App() {
     if (!resultToken) { setError('Only the organiser who created this match can record its result.'); return; }
     setError(''); setLoading(true);
     try {
-      await api(`/api/communities/${community.slug}/matches/${match.id}/result`, {
+      await api<{ match: CommunityMatch }>(`/api/communities/${community.slug}/matches/${match.id}/result`, {
         method: 'POST', body: JSON.stringify({ resultToken, winningTeamId: teamId }),
       });
       await loadCommunity(community.slug);
