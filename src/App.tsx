@@ -215,9 +215,11 @@ export default function App() {
     await loadCommunity(slug, true);
   }
 
-  function adminHeaders() {
+  function adminHeaders(): Record<string, string> {
     const token = community ? localStorage.getItem(`matchset-admin:${community.slug}`) || '' : '';
-    return token ? { 'X-Community-Admin-Token': token } : {};
+    const headers: Record<string, string> = {};
+    if (token) headers['X-Community-Admin-Token'] = token;
+    return headers;
   }
 
   async function changeMemberRole(member: Member) {
