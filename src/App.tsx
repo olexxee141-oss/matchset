@@ -78,7 +78,7 @@ export default function App() {
   const [communityName, setCommunityName] = useState('');
   const [creatorName, setCreatorName] = useState('');
   const [joinCode, setJoinCode] = useState('');
-  const [communityTab, setCommunityTab] = useState<'overview' | 'matches' | 'create-match'>('overview');
+  const [communityTab, setCommunityTab] = useState<'overview' | 'matches' | 'create-match' | 'tournaments'>('overview');
   const [communityMenuOpen, setCommunityMenuOpen] = useState(false);
   const [newMemberName, setNewMemberName] = useState('');
   const [currentMemberId, setCurrentMemberId] = useState('');
@@ -361,7 +361,7 @@ export default function App() {
   }
   function openHome() {
     window.history.pushState({}, '', '/');
-    setPage('home'); setSession(null); setCommunity(null); setCommunityAccess('VIEWER'); setRecentCommunities(JSON.parse(localStorage.getItem('matchset-recent-communities') || '[]')); setError(''); setNotice(''); setShowViewInput(false);
+    setPage('home'); setSession(null); setCommunity(null); setCommunityAccess('VIEWER'); setRecentCommunities(() => { try { return JSON.parse(localStorage.getItem('matchset-recent-communities') || '[]') as Community[]; } catch { return []; } }); setError(''); setNotice(''); setShowViewInput(false);
   }
 
   return <main className="shell">
