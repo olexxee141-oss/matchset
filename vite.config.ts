@@ -1,8 +1,1 @@
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-
-export default defineConfig({
-  plugins: [react()],
-  server: { proxy: { '/api': 'http://localhost:4000' } },
-  build: { outDir: 'dist' },
-});
+import { defineConfig } from 'vite';\nimport react from '@vitejs/plugin-react';\n\nexport default defineConfig({\n  plugins: [react()],\n  server: { proxy: { '/api': 'http://localhost:4000' } },\n  // Vercel serves public/ through its CDN; original assets live in static/.\n  publicDir: 'static',\n  build: { outDir: 'public', emptyOutDir: true },\n});\n
