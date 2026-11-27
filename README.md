@@ -1,17 +1,36 @@
 # MatchSet
 
-A lightweight PWA for arranging players into balanced groups and sharing one read-only link.
+A lightweight PWA for arranging players into balanced teams, sharing links, and keeping a community's match history.
 
 ## What it does
 
-- **Create a set:** enter an arrangement name, paste player names (one per line), choose the maximum players per set, and generate.
-- **View a set:** open the shared URL. Viewers do not need accounts.
-- **Creator edits:** the creator can edit from the browser/device used to create the arrangement. Viewers remain read-only.
-- **Balanced distribution:** every player is included; group sizes differ by at most one and never exceed the selected maximum.
+### Communities
+- Create a community and receive a private organiser token.
+- Invite players with a public community link or code.
+- Maintain a persistent, community-specific player roster.
+- Create matches from roster members; teams are balanced automatically.
+- Record one winning team per match.
+- View the latest 100 matches and an all-time leaderboard with wins, losses, matches played, and win rate.
+- Every player on the winning team receives one win. A match result can only be recorded once.
+
+### Standalone arrangements
+- Create a one-off arrangement by entering player names individually.
+- Open a read-only share link.
+- The creator can edit from the browser/device used to create it.
+- Copy or print the full arrangement.
+- Group sizes differ by at most one and never exceed the selected maximum.
 
 ## Stack
 
 React + TypeScript + Vite, Express, and Neon PostgreSQL. One deployable app; no accounts, queues, microservices, or PlayGeng dependency.
+
+## Important MVP limitations
+
+- Community membership uses display names, not verified accounts. A member can join with a name, but identity is not proven. Do not treat this leaderboard as a verified competition record until account authentication is added.
+- The community organiser token and match result tokens are stored in the creator's browser localStorage. Losing that browser storage means losing the corresponding organiser/result permissions.
+- Community invite links are public. Anyone with the link can view the roster/history and join with an unused display name.
+- The organiser creates matches; the device that created each match records its result. Results are immutable after submission in this MVP.
+- Match history displays the latest 100 matches; the leaderboard is calculated across all completed matches.
 
 ## Neon setup
 
@@ -37,6 +56,8 @@ Neon CLI pulls `DATABASE_URL` into `.env` if it exists, otherwise `.env.local`. 
 
 Postgres is built into every Neon project. `neon.ts` intentionally declares no additional services: this app does not need Neon Auth, Object Storage, Functions, or the Data API.
 
+The API creates its tables and indexes at startup if they do not exist. Community tables are additive; existing standalone arrangements are preserved.
+
 ## Run locally
 
 ```bash
@@ -44,7 +65,7 @@ npm install
 npm run dev
 ```
 
-The Vite app runs at http://localhost:5173 and proxies API requests to http://localhost:4000. The API creates the `match_sessions` table at startup if it does not exist.
+The Vite app runs at http://localhost:5173 and proxies API requests to http://localhost:4000.
 
 ## Checks
 
