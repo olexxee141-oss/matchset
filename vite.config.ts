@@ -4,7 +4,8 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   server: { proxy: { '/api': 'http://localhost:4000' } },
-  // Vercel serves public/ through its CDN; original assets live in static/.
+  // Keep the Vite output aligned with Vercel's configured output directory.
+  // Original PWA assets live in static/ and are copied into dist/.
   publicDir: 'static',
-  build: { outDir: 'public', emptyOutDir: true },
+  build: { outDir: 'dist', emptyOutDir: true },
 });
