@@ -12,17 +12,16 @@ describe('buildCommunityLeaderboard', () => {
         ],
       },
       {
-        winning_team_id: 2,
+        winning_team_id: 1,
         teams: [
-          { id: 1, players: [{ id: 'a', name: 'Alex' }, { id: 'c', name: 'Casey' }] },
-          { id: 2, players: [{ id: 'b', name: 'Blair' }, { id: 'd', name: 'Drew' }] },
+          { id: 1, players: [{ id: 'c', name: 'Casey' }, { id: 'd', name: 'Drew' }] },
+          { id: 2, players: [{ id: 'a', name: 'Alex' }, { id: 'b', name: 'Blair' }] },
         ],
       },
     ]);
-    expect(rows.find((row) => row.memberId === 'a')).toMatchObject({ wins: 1, losses: 1, matchesPlayed: 2, winRate: 50 });
-    expect(rows.find((row) => row.memberId === 'b')).toMatchObject({ wins: 1, losses: 1, matchesPlayed: 2, winRate: 50 });
-    expect(rows.find((row) => row.memberId === 'c')).toMatchObject({ wins: 1, losses: 1, matchesPlayed: 2, winRate: 50 });
-    expect(rows.find((row) => row.memberId === 'd')).toMatchObject({ wins: 1, losses: 1, matchesPlayed: 2, winRate: 50 });
+    for (const id of ['a', 'b', 'c', 'd']) {
+      expect(rows.find((row) => row.memberId === id)).toMatchObject({ wins: 1, losses: 1, matchesPlayed: 2, winRate: 50 });
+    }
   });
 
   it('does not award wins for matches without a recorded result', () => {
