@@ -149,7 +149,7 @@ export default function App() {
       setMatches(result.matches);
       setLeaderboard(result.leaderboard);
       setTournaments(result.tournaments || []);
-      setCommunityAccess(result.access?.role || 'VIEWER');
+      setCommunityAccess(result.access?.role || (savedOwnerToken ? 'OWNER' : 'VIEWER'));
       setCurrentMemberId(localStorage.getItem(`matchset-member:${slug}`) || '');
       setOwnerToken(savedOwnerToken);
       setSelectedMemberIds(result.members.map((member) => member.id));
