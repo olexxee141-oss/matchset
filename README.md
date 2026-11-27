@@ -86,7 +86,7 @@ npm run build
 npm start
 ```
 
-For a production run, set `NODE_ENV=production` and `PORT` as needed. The Express server serves the built frontend and API from one service.
+For a local production-mode run, set `NODE_ENV=production` and `PORT` as needed. Vercel serves the built frontend from its static CDN and runs the Express API as a Function.
 
 ## PWA
 
