@@ -121,6 +121,8 @@ export default function App() {
       setCurrentMemberId(localStorage.getItem(`matchset-member:${slug}`) || '');
       setOwnerToken(localStorage.getItem(`matchset-community-owner:${slug}`) || '');
       setSelectedMemberIds(result.members.map((member) => member.id));
+      setCommunityTab('overview');
+      setCommunityMenuOpen(false);
       setPage('community');
       if (updateUrl) window.history.pushState({}, '', `/community/${slug}`);
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not open this community.'); }
@@ -187,7 +189,7 @@ export default function App() {
     if (!community) return;
     setError(''); setLoading(true);
     try {
-      await api<{ member: Member }>(`/api/communities/${community.slug}/members`, { method: 'POST', body: JSON.stringify({ name: newMemberName }) });
+      await api<{ member: Member }>(`/api/communities/${community.slug}/members`, { method: 'POST', body: JSON.stringify({ name: newMemberName, ownerToken }) });
       setNewMemberName('');
       await loadCommunity(community.slug);
       setNotice('Player added to the community roster.');
@@ -214,6 +216,7 @@ export default function App() {
       localStorage.setItem(`matchset-result:${result.match.id}`, result.resultToken);
       setMatchTitle('');
       await loadCommunity(community.slug);
+      setCommunityTab('matches');
       setNotice('Teams created and saved to community history.');
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not create match.'); }
     finally { setLoading(false); }
