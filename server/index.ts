@@ -9,20 +9,37 @@ import { z } from 'zod';
 import { distributePlayers } from '../src/shared/distribute.js';
 import { buildCommunityLeaderboard } from '../src/shared/leaderboard.js';
 
-if (process.env.NODE_ENV !== 'production') {\n  dotenv.config({ path: existsSync('.env') ? '.env' : '.env.local' });\n}
+if (process.env.NODE_ENV !== 'production') {
+  dotenv.config({ path: existsSync('.env') ? '.env' : '.env.local' });
+}
 
 const app = express();
-const port = Number(process.env.PORT || 4000);
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 10,
-  idleTimeoutMillis: 30_000,
+  // Vercel may run several instances concurrently; keep each instance's pool small.
+  max: 2,
+  idleTimeoutMillis: 10_000,
   connectionTimeoutMillis: 5_000,
 });
 
 app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(cors());
-app.use(express.json({ limit: '100kb' }));\n\n// Cache the connectivity check per warm instance. Production schema is managed in Neon;\n// never run DDL on a Vercel Function cold start.\nlet databaseReady: Promise<void> | undefined;\nasync function ensureDatabase() {\n  if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required.');\n  databaseReady ??= pool.query('SELECT 1').then(() => undefined).catch((error) => {\n    databaseReady = undefined;\n    throw error;\n  });\n  await databaseReady;\n}\napp.use('/api', (_req, _res, next) => {\n  void ensureDatabase().then(() => next()).catch(next);\n});
+app.use(express.json({ limit: '100kb' }));
+
+// Cache the connectivity check per warm instance. Production schema is managed in Neon;
+// never run DDL on a Vercel Function cold start.
+let databaseReady: Promise<void> | undefined;
+async function ensureDatabase() {
+  if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required.');
+  databaseReady ??= pool.query('SELECT 1').then(() => undefined).catch((error) => {
+    databaseReady = undefined;
+    throw error;
+  });
+  await databaseReady;
+}
+app.use('/api', (_req, _res, next) => {
+  void ensureDatabase().then(() => next()).catch(next);
+});
 
 const inputSchema = z.object({
   name: z.string().trim().min(1).max(80),
@@ -46,7 +63,7 @@ const resultSchema = z.object({
   winningTeamId: z.number().int().positive(),
 });
 
-async function initializeDatabase() {
+export async function initializeDatabase() {
   if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required.');
   await pool.query(`
     CREATE TABLE IF NOT EXISTS match_sessions (
@@ -111,7 +128,7 @@ function publicSession(row: any) {
   };
 }
 function normalizeName(name: string) {
-  return name.trim().normalize('NFKC').toLocaleLowerCase('en').replace(/\\s+/g, ' ');
+  return name.trim().normalize('NFKC').toLocaleLowerCase('en').replace(/\s+/g, ' ');
 }
 app.get('/api/health', async (_req, res, next) => {
   try {
@@ -291,4 +308,4 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
   return res.status(500).json({ error: 'Something went wrong. Please try again.' });
 });
 
-export default app;\n
+export default app;
