@@ -112,7 +112,7 @@ export default function App() {
 
   const setPage = (nextPage: AppPage) => {
     setPageState(nextPage);
-    const nextPath = nextPage === 'home' ? '/' : nextPage === 'create' ? '/arrange' : nextPage === 'view' && session ? '/set/' + session.id : nextPage === 'create-community' ? '/community/new' : nextPage === 'join-community' ? '/community/join' : nextPage === 'community' && community ? '/community/' + community.slug : nextPage === 'account' ? '/account' : nextPage === 'recover' ? '/recover/verify' : window.location.pathname;
+    const nextPath = nextPage === 'home' ? '/' : nextPage === 'create' ? '/arrange' : nextPage === 'view' || nextPage === 'community' ? window.location.pathname : nextPage === 'create-community' ? '/community/new' : nextPage === 'join-community' ? '/community/join' : nextPage === 'account' ? '/account' : nextPage === 'recover' ? '/recover/verify' : window.location.pathname;
     if (nextPath !== window.location.pathname) window.history.pushState({ page: nextPage }, '', nextPath);
   };
 
@@ -122,6 +122,13 @@ export default function App() {
   const isOwner = communityAccess === 'OWNER';
   const isAdmin = communityAccess === 'ADMIN';
   const canManageTournaments = isOwner || isAdmin;
+
+  useEffect(() => {
+    if (!communityMenuOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setCommunityMenuOpen(false); };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [communityMenuOpen]);
 
   useEffect(() => {
     const interval = window.setInterval(() => setClockNow(Date.now()), 1000);
