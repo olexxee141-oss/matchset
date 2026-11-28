@@ -23,6 +23,10 @@ type LeaderboardEntry = { memberId: string; name: string; memberCode?: string; w
 type Community = { slug: string; name: string; createdAt: string };
 type CommunityPayload = { community: Community; members: Member[]; matches: CommunityMatch[]; leaderboard: LeaderboardEntry[]; tournaments: Tournament[]; access: { role: 'OWNER' | 'ADMIN' | 'VIEWER' } };
 
+function memberLabel(member: { name: string; memberCode?: string }) {
+  return member.memberCode ? `${member.name} · ${member.memberCode}` : member.name;
+}
+
 
 export default function App() {
   const [page, setPageState] = useState<AppPage>(() => resolveAppRoute(window.location.pathname).page);
