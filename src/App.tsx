@@ -274,17 +274,17 @@ export default function App() {
   }
 
   function resizeDraftGroups(count: number) {
-    setDraftTournamentGroups((current) => {
-      if (count < current.length) {
-        const removedGroups = current.slice(count);
-        const hasRegistration = removedGroups.some((group) => group.teams.some((team, index) =>
-          team.memberIds.length > 0 || team.name.trim() !== `Team ${index + 1}`));
-        if (hasRegistration) {
-          setError('Move or remove registrations from the last groups before reducing the group count.');
-          return current;
-        }
-        return current.slice(0, count);
+    if (count < draftTournamentGroups.length) {
+      const removedGroups = draftTournamentGroups.slice(count);
+      const hasRegistration = removedGroups.some((group) => group.teams.some((team, index) =>
+        team.memberIds.length > 0 || team.name.trim() !== `Team ${index + 1}`));
+      if (hasRegistration) {
+        setError('Move or remove registrations from the last groups before reducing the group count.');
+        return;
       }
+    }
+    setDraftTournamentGroups((current) => {
+      if (count <= current.length) return current.slice(0, count);
       return [
         ...current,
         ...Array.from({ length: count - current.length }, (_, offset) => ({
@@ -293,6 +293,7 @@ export default function App() {
         })),
       ];
     });
+    setError('');
   }
 
   function updateDraftTeam(groupIndex: number, teamIndex: number, patch: Partial<DraftTournamentTeam>) {
