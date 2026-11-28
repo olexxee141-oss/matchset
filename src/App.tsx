@@ -10,7 +10,8 @@ type Tournament = { id: string; name: string; createdAt: string; groups: Tournam
 type DraftTournamentTeam = { name: string; memberIds: string[] };
 type Team = { id: number; players: Array<{ id: string; name: string }> };
 type RotationGame = { number: number; teamAId: number; teamBId: number; outcome: 'TEAM_A_WIN' | 'TEAM_B_WIN' | 'DRAW'; winnerTeamId: number | null; playedAt: string };
-type RotationState = { status: 'ACTIVE' | 'ENDED'; activeTeamIds: number[]; waitingTeamIds: number[]; games: RotationGame[] };\ntype CommunityMatch = { id: string; title: string; teams: Team[]; winningTeamId: number | null; rotationState?: RotationState | null; createdAt: string; completedAt: string | null };
+type RotationState = { status: 'ACTIVE' | 'ENDED'; activeTeamIds: number[]; waitingTeamIds: number[]; games: RotationGame[] };
+type CommunityMatch = { id: string; title: string; teams: Team[]; winningTeamId: number | null; rotationState?: RotationState | null; createdAt: string; completedAt: string | null };
 type LeaderboardEntry = { memberId: string; name: string; wins: number; losses: number; draws?: number; matchesPlayed: number; winRate: number };
 type Community = { slug: string; name: string; createdAt: string };
 type CommunityPayload = { community: Community; members: Member[]; matches: CommunityMatch[]; leaderboard: LeaderboardEntry[]; tournaments: Tournament[]; access: { role: 'OWNER' | 'ADMIN' | 'VIEWER' } };
