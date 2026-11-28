@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import type { FormEvent } from 'react';
+import { resolveAppRoute, type AppPage } from './navigation';
+import { ActionButton, SectionTabs } from './components/ui';
 
 type SetGroup = { id: number; players: string[] };
 type Session = { id: string; name: string; players: string[]; playersPerSet: number; sets: SetGroup[]; createdAt: string; updatedAt: string };
@@ -54,7 +56,7 @@ function extractCode(value: string, kind: 'set' | 'community') {
 }
 
 export default function App() {
-  const [page, setPage] = useState<'home' | 'create' | 'view' | 'create-community' | 'join-community' | 'community' | 'account' | 'recover'>('home');
+  const [page, setPageState] = useState<AppPage>(() => resolveAppRoute(window.location.pathname).page);
   const [session, setSession] = useState<Session | null>(null);
   const [name, setName] = useState('');
   const [playerNames, setPlayerNames] = useState<string[]>(['', '']);
@@ -108,6 +110,12 @@ export default function App() {
   const [recoveryLinkToken, setRecoveryLinkToken] = useState('');
   const [recoveryMessage, setRecoveryMessage] = useState('');
 
+  const setPage = (nextPage: AppPage) => {
+    setPageState(nextPage);
+    const nextPath = nextPage === 'home' ? '/' : nextPage === 'create' ? '/arrange' : nextPage === 'view' && session ? '/set/' + session.id : nextPage === 'create-community' ? '/community/new' : nextPage === 'join-community' ? '/community/join' : nextPage === 'community' && community ? '/community/' + community.slug : nextPage === 'account' ? '/account' : nextPage === 'recover' ? '/recover/verify' : window.location.pathname;
+    if (nextPath !== window.location.pathname) window.history.pushState({ page: nextPage }, '', nextPath);
+  };
+
 
   const players = useMemo(() => playerNames.map((item) => item.trim()).filter(Boolean), [playerNames]);
   const projectedSets = players.length >= 2 ? Math.ceil(players.length / playersPerSet) : 0;
@@ -144,7 +152,7 @@ export default function App() {
     setError('');
   }
 
-  async function loadSession(value: string) {
+  async function loadSession(value: string, updateUrl = true) {
     setError(''); setNotice('');
     const slug = extractCode(value, 'set');
     if (!slug) { setError('Enter a valid MatchSet link or set code.'); return; }
@@ -159,7 +167,7 @@ export default function App() {
       setPlayersPerSet(result.session.playersPerSet);
       setEditing(false);
       setPage('view');
-      window.history.pushState({}, '', `/set/${slug}`);
+      if (updateUrl && window.location.pathname !== `/set/${slug}`) window.history.pushState({}, '', `/set/${slug}`);
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not load this set.'); }
     finally { setLoading(false); }
   }
@@ -215,8 +223,22 @@ export default function App() {
         return;
       }
     }
-    if (parts[0] === 'set' && parts[1]) void loadSession(parts[1]);
-    if (parts[0] === 'community' && parts[1]) void loadCommunity(parts[1]);
+    if (parts[0] === 'set' && parts[1]) void loadSession(parts[1], false);
+    if (parts[0] === 'community' && parts[1] && parts[1] !== 'new' && parts[1] !== 'join') void loadCommunity(parts[1]);
+  }, []);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const route = resolveAppRoute(window.location.pathname);
+      setError(''); setNotice('');
+      if (route.page === 'community' && route.slug) { void loadCommunity(route.slug); return; }
+      if (route.page === 'view' && route.slug) { void loadSession(route.slug, false); return; }
+      if (route.page === 'home') { setCommunity(null); setSession(null); }
+      if (route.page === 'recover') setRecoveryLinkToken(new URLSearchParams(window.location.hash.replace(/^#/, '')).get('token') || '');
+      setPageState(route.page);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
   useEffect(() => {
@@ -592,7 +614,7 @@ export default function App() {
   }
 
   return <main className="shell">
-    <header className="topbar"><button className="brand" onClick={openHome} aria-label="MatchSet home"><span className="brand-mark">M</span> matchset</button><span className="top-note">PLAYER ARRANGEMENTS, MADE SIMPLE</span><button className="account-top-button" onClick={() => { setError(''); setPage('account'); }}>Account</button></header>
+    <header className="topbar"><button className="brand" onClick={openHome} aria-label="MatchSet home"><span className="brand-mark">M</span> matchset</button><span className="top-note">PLAYER ARRANGEMENTS, MADE SIMPLE</span><ActionButton variant="secondary" className="account-top-button" onClick={() => { setError(''); setPage('account'); }}>Account</ActionButton></header>
 
     {page === 'home' && <section className="hero">
       <div className="eyebrow"><span className="pulse" /> LESS TIME ORGANISING. MORE TIME PLAYING.</div>
@@ -709,12 +731,12 @@ export default function App() {
         <div><strong>{matches.length}</strong><span>MATCHES</span></div>
         <div><strong>{matches.reduce((total, match) => total + (match.rotationState?.games.length ?? (match.winningTeamId !== null ? 1 : 0)), 0)}</strong><span>RESULTS</span></div>
       </div>
-      <nav className="community-tabs" aria-label="Community sections">
+      <SectionTabs ariaLabel="Community sections">
         <button className={communityTab === 'overview' ? 'active' : ''} onClick={() => setCommunityTab('overview')}>Overview</button>
         <button className={communityTab === 'matches' ? 'active' : ''} onClick={() => setCommunityTab('matches')}>Matches <span>{matches.length}</span></button>
         {isOwner && <button className={communityTab === 'create-match' ? 'active' : ''} onClick={() => setCommunityTab('create-match')}>Create match <span>＋</span></button>}
         <button className={communityTab === 'tournaments' ? 'active' : ''} onClick={() => setCommunityTab('tournaments')}>Tournaments <span>{tournaments.length}</span></button>
-      </nav>
+      </SectionTabs>
       {communityTab === 'create-match' && isOwner && <div className="community-panel">
         <div className="panel-heading"><div><span className="section-kicker">ORGANISER TOOLS</span><h2>Create a match</h2></div></div>
         <form className="community-form" onSubmit={createCommunityMatch}>
