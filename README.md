@@ -116,7 +116,7 @@ The app includes a web manifest and an installable app shell. The API remains on
 
 - **My Communities** keeps up to 12 recently opened communities in the current browser so users can return without finding the invite link again. This is device-local history, not account-based membership sync; clearing browser data or changing devices removes this shortcut.
 - Community owners can promote roster members to **Admin** and revoke that role later.
-- Admins can create tournaments, distribute teams across groups, and move teams between groups. They cannot manage the roster, appoint admins, create regular matches, or record match results.
+- Owners and Admins can create tournaments by registering teams directly inside each group. Players are selected from the community roster and can only be registered once per tournament. Teams can be moved between groups after creation. Admins cannot manage the roster, appoint admins, create regular matches, or record match results.
 - Admin access is currently delivered through a private bearer link because MatchSet does not yet require user accounts. Share it only with the intended member; demoting that member revokes the token.
 - Tournament data and role changes are persisted in Neon. The backend migration is maintained in [MatchSet-backend](https://github.com/olexxee141-oss/Matchset-backend/tree/main/docs/migrations).
 
