@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import type { FormEvent } from 'react';
+import { resolveAppRoute, type AppPage } from './navigation';
+import { api } from './lib/api';
+import { extractCode } from './lib/codes';
+import { ActionButton, SectionTabs, StatusMessage } from './components/ui';
+import { LiveMatchCard } from './components/LiveMatchCard';
 
 type SetGroup = { id: number; players: string[] };
 type Session = { id: string; name: string; players: string[]; playersPerSet: number; sets: SetGroup[]; createdAt: string; updatedAt: string };
@@ -18,43 +23,9 @@ type LeaderboardEntry = { memberId: string; name: string; wins: number; losses: 
 type Community = { slug: string; name: string; createdAt: string };
 type CommunityPayload = { community: Community; members: Member[]; matches: CommunityMatch[]; leaderboard: LeaderboardEntry[]; tournaments: Tournament[]; access: { role: 'OWNER' | 'ADMIN' | 'VIEWER' } };
 
-const API_BASE_URL = (import.meta.env.DEV ? (import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000') : '').replace(/\/+$/, '');
-
-const api = async <T,>(url: string, options?: RequestInit): Promise<T> => {
-  const response = await fetch(`${API_BASE_URL}${url}`, {
-    ...options,
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-  });
-  const body = await response.text();
-  let data: unknown;
-  try {
-    data = body ? JSON.parse(body) : {};
-  } catch {
-    const preview = body.replace(/\s+/g, ' ').slice(0, 180);
-    const configurationHint = API_BASE_URL ? '' : ' Check that the Vercel /api rewrite points to the Render backend.';
-    throw new Error(`API returned non-JSON (HTTP ${response.status}).${configurationHint} Response: ${preview || '(empty response)'}`);
-  }
-  if (!response.ok) {
-    const message = typeof data === 'object' && data !== null && 'error' in data && typeof data.error === 'string'
-      ? data.error
-      : `Request failed (HTTP ${response.status}).`;
-    throw new Error(message);
-  }
-  return data as T;
-};
-
-function extractCode(value: string, kind: 'set' | 'community') {
-  let slug = value.trim();
-  try {
-    if (slug.includes('://')) slug = new URL(slug).pathname.split('/').filter(Boolean).at(-1) || '';
-  } catch { return ''; }
-  slug = slug.replace(new RegExp('^' + kind + '/'), '').trim();
-  return /^[a-zA-Z0-9_-]{6,40}$/.test(slug) ? slug : '';
-}
 
 export default function App() {
-  const [page, setPage] = useState<'home' | 'create' | 'view' | 'create-community' | 'join-community' | 'community' | 'account' | 'recover'>('home');
+  const [page, setPageState] = useState<AppPage>(() => resolveAppRoute(window.location.pathname).page);
   const [session, setSession] = useState<Session | null>(null);
   const [name, setName] = useState('');
   const [playerNames, setPlayerNames] = useState<string[]>(['', '']);
@@ -108,12 +79,25 @@ export default function App() {
   const [recoveryLinkToken, setRecoveryLinkToken] = useState('');
   const [recoveryMessage, setRecoveryMessage] = useState('');
 
+  const setPage = (nextPage: AppPage) => {
+    setPageState(nextPage);
+    const nextPath = nextPage === 'home' ? '/' : nextPage === 'create' ? '/arrange' : nextPage === 'view' || nextPage === 'community' ? window.location.pathname : nextPage === 'create-community' ? '/community/new' : nextPage === 'join-community' ? '/community/join' : nextPage === 'account' ? '/account' : nextPage === 'recover' ? '/recover/verify' : window.location.pathname;
+    if (nextPath !== window.location.pathname) window.history.pushState({ page: nextPage }, '', nextPath);
+  };
+
 
   const players = useMemo(() => playerNames.map((item) => item.trim()).filter(Boolean), [playerNames]);
   const projectedSets = players.length >= 2 ? Math.ceil(players.length / playersPerSet) : 0;
   const isOwner = communityAccess === 'OWNER';
   const isAdmin = communityAccess === 'ADMIN';
   const canManageTournaments = isOwner || isAdmin;
+
+  useEffect(() => {
+    if (!communityMenuOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setCommunityMenuOpen(false); };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [communityMenuOpen]);
 
   useEffect(() => {
     const interval = window.setInterval(() => setClockNow(Date.now()), 1000);
@@ -144,7 +128,7 @@ export default function App() {
     setError('');
   }
 
-  async function loadSession(value: string) {
+  async function loadSession(value: string, updateUrl = true) {
     setError(''); setNotice('');
     const slug = extractCode(value, 'set');
     if (!slug) { setError('Enter a valid MatchSet link or set code.'); return; }
@@ -159,7 +143,7 @@ export default function App() {
       setPlayersPerSet(result.session.playersPerSet);
       setEditing(false);
       setPage('view');
-      window.history.pushState({}, '', `/set/${slug}`);
+      if (updateUrl && window.location.pathname !== `/set/${slug}`) window.history.pushState({}, '', `/set/${slug}`);
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not load this set.'); }
     finally { setLoading(false); }
   }
@@ -215,8 +199,22 @@ export default function App() {
         return;
       }
     }
-    if (parts[0] === 'set' && parts[1]) void loadSession(parts[1]);
-    if (parts[0] === 'community' && parts[1]) void loadCommunity(parts[1]);
+    if (parts[0] === 'set' && parts[1]) void loadSession(parts[1], false);
+    if (parts[0] === 'community' && parts[1] && parts[1] !== 'new' && parts[1] !== 'join') void loadCommunity(parts[1]);
+  }, []);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const route = resolveAppRoute(window.location.pathname);
+      setError(''); setNotice('');
+      if (route.page === 'community' && route.slug) { void loadCommunity(route.slug); return; }
+      if (route.page === 'view' && route.slug) { void loadSession(route.slug, false); return; }
+      if (route.page === 'home') { setCommunity(null); setSession(null); }
+      if (route.page === 'recover') setRecoveryLinkToken(new URLSearchParams(window.location.hash.replace(/^#/, '')).get('token') || '');
+      setPageState(route.page);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
   useEffect(() => {
@@ -592,25 +590,58 @@ export default function App() {
   }
 
   return <main className="shell">
-    <header className="topbar"><button className="brand" onClick={openHome} aria-label="MatchSet home"><span className="brand-mark">M</span> matchset</button><span className="top-note">PLAYER ARRANGEMENTS, MADE SIMPLE</span><button className="account-top-button" onClick={() => { setError(''); setPage('account'); }}>Account</button></header>
+    <header className="topbar"><button className="brand" onClick={openHome} aria-label="MatchSet home"><span className="brand-mark">M</span> matchset</button><span className="top-note">PLAYER ARRANGEMENTS, MADE SIMPLE</span><ActionButton variant="secondary" className="account-top-button" onClick={() => { setError(''); setPage('account'); }}>Account</ActionButton></header>
 
-    {page === 'home' && <section className="hero">
-      <div className="eyebrow"><span className="pulse" /> LESS TIME ORGANISING. MORE TIME PLAYING.</div>
-      <h1>Make the lineup.<br /><em>Get into the game.</em></h1>
-      <p className="intro">Put players into balanced teams, keep a record of every match, and see who wins most in your community.</p>
-      {recentCommunities.length > 0 && <section className="recent-communities">
-        <div className="panel-heading"><div><span className="section-kicker">SAVED ON THIS DEVICE</span><h2>My communities</h2></div><span className="count">{recentCommunities.length} SAVED</span></div>
-        <div className="recent-community-list">{recentCommunities.map((item) => <button className="recent-community-card" key={item.slug} onClick={() => void loadCommunity(item.slug, true)} disabled={loading}><span className="recent-community-mark">{item.name.slice(0, 1).toUpperCase()}</span><span><strong>{item.name}</strong><small>Open community</small></span><span className="arrow">↗</span></button>)}</div>
-      </section>}
-      <div className="choices">
-        <button className="choice create-choice" onClick={() => { setError(''); setPage('create-community'); }}><span className="choice-icon">＋</span><span><strong>Create a community</strong><small>Start a group and keep its match history.</small></span><span className="arrow">↗</span></button>
-        <button className="choice view-choice" onClick={() => { setError(''); setPage('join-community'); }}><span className="choice-icon">⌕</span><span><strong>View a community</strong><small>Open an invite link or community code.</small></span><span className="arrow">↗</span></button>
-        <button className="choice view-choice" onClick={startCreate}><span className="choice-icon">▦</span><span><strong>Quick arrangement</strong><small>Create a standalone shareable set.</small></span><span className="arrow">↗</span></button>
-        <button className="choice view-choice" onClick={() => { setShowViewInput((value) => !value); setError(''); }}><span className="choice-icon">↗</span><span><strong>View a set</strong><small>Open a standalone arrangement link.</small></span><span className="arrow">↗</span></button>
-      </div>
-      {showViewInput && <form className="lookup-form" onSubmit={(event) => { event.preventDefault(); void loadSession(viewLink); }}><label htmlFor="view-link">PASTE THE SHARED LINK OR SET CODE</label><div><input id="view-link" value={viewLink} onChange={(event) => setViewLink(event.target.value)} placeholder="https://…/set/abc123" autoFocus /><button className="primary-btn lookup-button" disabled={loading}>Open set ↗</button></div></form>}
-      <div className="hero-foot"><span>NO ACCOUNT NEEDED</span><span>·</span><span>COMMUNITY HISTORY</span><span>·</span><span>SHARE INSTANTLY</span></div>
-      {error && <p className="error">{error}</p>}
+    {page === 'home' && <section className="home-dashboard workspace">
+      <header className="home-intro">
+        <div className="eyebrow"><span className="pulse" /> MATCHDAY WORKSPACE</div>
+        <h1>Make matchday <em>count.</em></h1>
+        <p className="intro">Bring your players together, organise teams, run matches and keep the results.</p>
+        <div className="home-primary-actions">
+          <button className="home-action home-action-primary" onClick={() => { setError(''); setPage('create-community'); }}>
+            <span className="home-action-icon">＋</span><span><strong>Create a community</strong><small>Start a group and manage its match history.</small></span><span className="home-action-arrow">↗</span>
+          </button>
+          <button className="home-action" onClick={() => { setError(''); setPage('join-community'); }}>
+            <span className="home-action-icon">⌕</span><span><strong>Open a community</strong><small>Use an invite link or community code.</small></span><span className="home-action-arrow">↗</span>
+          </button>
+        </div>
+      </header>
+
+      <section className="home-section home-communities">
+        <div className="home-section-heading">
+          <div><span className="section-kicker">YOUR MATCHDAY SPACES</span><h2>My communities</h2></div>
+          <span className="home-section-meta">{recentCommunities.length} RECENT</span>
+        </div>
+        {recentCommunities.length > 0 ? <div className="home-community-grid">
+          {recentCommunities.map((item) => <button className="home-community-card" key={item.slug} onClick={() => void loadCommunity(item.slug, true)} disabled={loading}>
+            <span className="home-community-mark">{item.name.slice(0, 1).toUpperCase()}</span>
+            <span className="home-community-copy"><strong>{item.name}</strong><small>Open community workspace</small></span>
+            <span className="home-action-arrow">↗</span>
+          </button>)}
+        </div> : <div className="home-empty-state">
+          <span className="home-empty-icon">◎</span>
+          <div><strong>No communities opened yet</strong><p>Open a community invite or create one to keep its players and match history together.</p></div>
+          <button className="secondary-btn" onClick={() => setPage('join-community')}>Open invite link</button>
+        </div>}
+      </section>
+
+      <section className="home-section home-tools">
+        <div className="home-section-heading"><div><span className="section-kicker">STANDALONE TOOLS</span><h2>Quick actions</h2></div></div>
+        <div className="home-tool-grid">
+          <button className="home-tool-card" onClick={startCreate}>
+            <span className="home-tool-icon">▦</span><span><strong>Quick arrangement</strong><small>Balance players into shareable sets.</small></span><span className="home-action-arrow">↗</span>
+          </button>
+          <button className="home-tool-card" onClick={() => { setShowViewInput((value) => !value); setError(''); }}>
+            <span className="home-tool-icon">↗</span><span><strong>Open a saved set</strong><small>Return to a standalone arrangement.</small></span><span className="home-action-arrow">↗</span>
+          </button>
+        </div>
+        {showViewInput && <form className="lookup-form" onSubmit={(event) => { event.preventDefault(); void loadSession(viewLink); }}>
+          <label htmlFor="view-link">SHARED LINK OR SET CODE</label>
+          <div><input id="view-link" value={viewLink} onChange={(event) => setViewLink(event.target.value)} placeholder="Paste a MatchSet link or code" autoFocus /><button className="primary-btn lookup-button" disabled={loading}>Open set ↗</button></div>
+        </form>}
+      </section>
+      {loading && <StatusMessage tone="info">Opening your MatchSet workspace…</StatusMessage>}
+      {error && <StatusMessage tone="error">{error}</StatusMessage>}
     </section>}
 
     {page === 'account' && <section className="workspace account-workspace">
@@ -657,14 +688,14 @@ export default function App() {
           {recoveryMessage && <p className="success-note">{recoveryMessage}</p>}
         </form>
       </>}
-      {error && <p className="error">{error}</p>}
+      {error && <StatusMessage tone="error">{error}</StatusMessage>}
     </section>}
 
     {page === 'recover' && <section className="workspace account-workspace">
       <div className="section-kicker">ACCOUNT RECOVERY</div><h1 className="page-title">Restore your <em>access.</em></h1>
       <p className="subcopy">Your email link is valid for a short time. Continue to register a new passkey, then save the replacement recovery code.</p>
       <button className="primary-btn submit-button" disabled={accountBusy || !recoveryLinkToken} onClick={() => void completeAccountRecovery()}>{accountBusy ? 'Verifying…' : 'Verify and register new passkey'} <span>↗</span></button>
-      {error && <p className="error">{error}</p>}
+      {error && <StatusMessage tone="error">{error}</StatusMessage>}
     </section>}
 
     {page === 'create-community' && <section className="workspace">
@@ -677,7 +708,7 @@ export default function App() {
         <p className="hint">You become the community organiser. Keep your browser data safe: organiser permissions are stored on this device.</p>
         <button className="primary-btn submit-button" disabled={loading}>{loading ? 'Creating…' : 'Create community'} <span>↗</span></button>
       </form>
-      {error && <p className="error">{error}</p>}
+      {error && <StatusMessage tone="error">{error}</StatusMessage>}
     </section>}
 
     {page === 'join-community' && <section className="workspace">
@@ -689,7 +720,7 @@ export default function App() {
         <p className="hint">Invite links are read-only. Only the community creator can add players or manage matches.</p>
         <button className="primary-btn submit-button" disabled={loading}>{loading ? 'Opening…' : 'View community'} <span>↗</span></button>
       </form>
-      {error && <p className="error">{error}</p>}
+      {error && <StatusMessage tone="error">{error}</StatusMessage>}
     </section>}
 
     {page === 'community' && community && <section className="workspace community-workspace">
@@ -709,12 +740,12 @@ export default function App() {
         <div><strong>{matches.length}</strong><span>MATCHES</span></div>
         <div><strong>{matches.reduce((total, match) => total + (match.rotationState?.games.length ?? (match.winningTeamId !== null ? 1 : 0)), 0)}</strong><span>RESULTS</span></div>
       </div>
-      <nav className="community-tabs" aria-label="Community sections">
+      <SectionTabs ariaLabel="Community sections">
         <button className={communityTab === 'overview' ? 'active' : ''} onClick={() => setCommunityTab('overview')}>Overview</button>
         <button className={communityTab === 'matches' ? 'active' : ''} onClick={() => setCommunityTab('matches')}>Matches <span>{matches.length}</span></button>
         {isOwner && <button className={communityTab === 'create-match' ? 'active' : ''} onClick={() => setCommunityTab('create-match')}>Create match <span>＋</span></button>}
         <button className={communityTab === 'tournaments' ? 'active' : ''} onClick={() => setCommunityTab('tournaments')}>Tournaments <span>{tournaments.length}</span></button>
-      </nav>
+      </SectionTabs>
       {communityTab === 'create-match' && isOwner && <div className="community-panel">
         <div className="panel-heading"><div><span className="section-kicker">ORGANISER TOOLS</span><h2>Create a match</h2></div></div>
         <form className="community-form" onSubmit={createCommunityMatch}>
@@ -772,36 +803,19 @@ export default function App() {
       {communityTab === 'matches' && <section className="community-panel history-panel">
         <div className="panel-heading"><div><span className="section-kicker">COMMUNITY RECORD</span><h2>Match history</h2></div><span className="count">LATEST 100</span></div>
         {matches.length === 0 ? <p className="empty-state">No matches yet. The community creator can create the first one.</p> : <div className="match-history">
-          {matches.map((match) => {
-            const resultToken = localStorage.getItem('matchset-result:' + match.id) || '';
-            const rotation = match.rotationState;
-            const activeTeams = rotation?.activeTeamIds.map((id) => match.teams.find((team) => team.id === id)).filter((team): team is Team => Boolean(team)) || [];
-            const waitingTeams = rotation?.waitingTeamIds.map((id) => match.teams.find((team) => team.id === id)).filter((team): team is Team => Boolean(team)) || [];
-            return <article className="history-match" key={match.id}>
-              <div className="history-match-head"><div><h3>{match.title}</h3><span>{new Date(match.createdAt).toLocaleDateString()} · {match.teams.length} teams · {rotation ? rotation.games.length + ' games played' : 'Legacy match'}</span></div><span className={rotation || match.winningTeamId ? 'result-status complete' : 'result-status'}>{rotation ? 'ROTATION ACTIVE' : match.winningTeamId ? 'TEAM ' + match.winningTeamId + ' WON' : 'AWAITING RESULT'}</span></div>
-              {rotation ? <>
-                <div className="rotation-current"><div className="rotation-label">ON THE PITCH · CURRENT GAME</div>
-                  <div className="timer-panel">
-                    <strong className="match-score">{(rotation.score?.[0] ?? 0)} — {(rotation.score?.[1] ?? 0)}</strong>
-                    <span className="timer-readout">{(() => { const remaining = rotation.timerPausedAt ? (rotation.pausedRemainingMs ?? 0) : Math.max(0, (rotation.durationSeconds ?? 600) * 1000 - (clockNow - new Date(rotation.timerStartedAt || match.createdAt).getTime())); return String(Math.floor(remaining / 60000)).padStart(2,'0') + ':' + String(Math.floor((remaining % 60000) / 1000)).padStart(2,'0'); })()}</span>
-                    <small>FIRST TO {rotation.goalsToWin ?? 1} · {Math.round((rotation.durationSeconds ?? 600) / 60)} MINUTES</small>
-                    {isOwner && resultToken && <button className="text-button" disabled={loading} onClick={() => void controlRotationTimer(match, rotation.timerPausedAt ? 'RESUME' : 'PAUSE')}>{rotation.timerPausedAt ? 'Resume timer' : 'Pause timer'}</button>}
-                  </div>
-                  <div className="history-teams">{activeTeams.map((team, index) => <div className="history-team active-team" key={team.id}><div><b>SET {team.id}</b><span>{index === 0 ? 'TEAM A' : 'TEAM B'}</span></div><p>{team.players.map((player) => player.name).join(' · ')}</p></div>)}</div>
-                  {isOwner && resultToken && <div className="goal-entry">
-                    <label className="field-label">SCORING TEAM<select value={goalSelections[match.id]?.teamId ?? activeTeams[0]?.id ?? ''} onChange={(e) => setGoalSelections((current) => ({ ...current, [match.id]: { teamId: Number(e.target.value), scorerId: '', assisterId: '' } }))}>{activeTeams.map((team) => <option key={team.id} value={team.id}>Set {team.id}</option>)}</select></label>
-                    {(() => { const team = match.teams.find((item) => item.id === (goalSelections[match.id]?.teamId ?? activeTeams[0]?.id)); const selection = goalSelections[match.id]; return team ? <><label className="field-label">GOAL SCORER<select value={selection?.scorerId ?? ''} onChange={(e) => setGoalSelections((current) => ({ ...current, [match.id]: { teamId: team.id, scorerId: e.target.value, assisterId: current[match.id]?.assisterId === e.target.value ? '' : (current[match.id]?.assisterId ?? '') } }))}><option value="">Select scorer</option>{team.players.map((player) => <option key={player.id} value={player.id}>{player.name}</option>)}</select></label><label className="field-label">ASSIST (OPTIONAL)<select value={selection?.assisterId ?? ''} onChange={(e) => setGoalSelections((current) => ({ ...current, [match.id]: { teamId: team.id, scorerId: current[match.id]?.scorerId ?? '', assisterId: e.target.value } }))}><option value="">No assist</option>{team.players.filter((player) => player.id !== selection?.scorerId).map((player) => <option key={player.id} value={player.id}>{player.name}</option>)}</select></label><button className="record-win-btn" disabled={loading || !selection?.scorerId} onClick={() => void recordGoal(match, team.id)}>Record goal</button></> : null; })()}
-                  </div>}
-                  {isOwner && resultToken && <div className="rotation-controls"><button className="record-win-btn draw-btn" disabled={loading || activeTeams.length !== 2} onClick={() => void recordRotationOutcome(match, 'DRAW')}>Declare draw</button></div>}
-                </div>
-                <div className="rotation-queue"><strong>WAITING QUEUE</strong><span>{waitingTeams.length ? waitingTeams.map((team) => 'Set ' + team.id).join(' · ') : 'No teams waiting — next rotation will bring teams back in.'}</span></div>
-                {rotation.goals && rotation.goals.length > 0 && <div className="rotation-goal-history"><strong>GOALS THIS GAME</strong>{rotation.goals.map((goal, index) => <p key={index}>Set {goal.teamId}: {goal.scorerName}{goal.assisterName ? ' · Assist: ' + goal.assisterName : ''}</p>)}</div>}
-                {rotation.games.length > 0 && <div className="rotation-last-game"><span>LAST RESULT</span><strong>{rotation.games[rotation.games.length - 1].outcome === 'DRAW' ? 'Draw' : 'Set ' + rotation.games[rotation.games.length - 1].winnerTeamId + ' won'}</strong>{isOwner && resultToken && <button className="text-button" disabled={loading} onClick={() => void undoRotationOutcome(match)}>Undo last result</button>}</div>}
-                <details className="rotation-history"><summary>Game history ({rotation.games.length})</summary>{rotation.games.length === 0 ? <p className="hint">No games recorded yet.</p> : <ol>{rotation.games.map((game) => <li key={game.number}>Game {game.number}: Set {game.teamAId} {game.score?.[0] ?? '—'}–{game.score?.[1] ?? '—'} Set {game.teamBId} — {game.outcome === 'DRAW' ? 'Draw' : 'Set ' + game.winnerTeamId + ' won'}{game.goals?.length ? ' · ' + game.goals.map((goal) => goal.scorerName + (goal.assisterName ? ' (A: ' + goal.assisterName + ')' : '')).join(', ') : ''}</li>)}</ol>}</details>
-                {!isOwner && <p className="read-only-note">The organiser records results and controls rotation.</p>}
-              </> : <div className="history-teams">{match.teams.map((team) => <div className={match.winningTeamId === team.id ? 'history-team winner' : 'history-team'} key={team.id}><div><b>TEAM {team.id}</b>{match.winningTeamId === team.id && <span>WINNER</span>}</div><p>{team.players.map((player) => player.name).join(' · ')}</p></div>)}</div>}
-            </article>;
-          })}
+          {matches.map((match) => <LiveMatchCard
+            key={match.id}
+            match={match}
+            isOwner={isOwner}
+            loading={loading}
+            clockNow={clockNow}
+            goalSelections={goalSelections}
+            setGoalSelections={setGoalSelections}
+            onRecordGoal={recordGoal}
+            onControlTimer={controlRotationTimer}
+            onRecordOutcome={recordRotationOutcome}
+            onUndo={undoRotationOutcome}
+          />)}
         </div>}
       </section>}
       {isAdmin && <p className="read-only-note">Admin access: you can create tournaments and manage groupings. The community owner controls members and roles.</p>}
