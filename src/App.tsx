@@ -781,11 +781,26 @@ export default function App() {
           <h3>Create tournament</h3>
           <label className="field-label">TOURNAMENT NAME<input value={tournamentName} onChange={(event) => setTournamentName(event.target.value)} placeholder="e.g. MatchSet Cup" maxLength={80} required /></label>
           <label className="field-label">NUMBER OF GROUPS<select value={tournamentGroupCount} onChange={(event) => setTournamentGroupCount(Number(event.target.value))}>{[2, 3, 4, 5, 6, 8].map((count) => <option key={count} value={count}>{count} groups</option>)}</select></label>
-          <div className="tournament-draft-teams">{tournamentTeams.map((team, index) => <div className="tournament-draft-team" key={index}>
-            <label className="field-label">TEAM {index + 1}<input value={team.name} onChange={(event) => updateDraftTeam(index, { name: event.target.value })} placeholder={`Team ${index + 1}`} maxLength={40} /></label>
-            <label className="field-label">PLAYERS<select multiple value={team.memberIds} onChange={(event) => updateDraftTeam(index, { memberIds: Array.from(event.currentTarget.selectedOptions, (option) => option.value) })}>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
-            {tournamentTeams.length > 2 && <button type="button" className="text-button" onClick={() => setTournamentTeams((current) => current.filter((_, teamIndex) => teamIndex !== index))}>Remove team</button>}
-          </div>)}</div>
+          <div className="tournament-draft-teams">{tournamentTeams.map((team, index) => {
+            const assignedElsewhere = new Set(tournamentTeams.flatMap((otherTeam, teamIndex) => teamIndex === index ? [] : otherTeam.memberIds));
+            return <div className="tournament-draft-team" key={index}>
+              <div className="tournament-team-heading"><span className="team-number">TEAM {index + 1}</span><span className="team-player-count">{team.memberIds.length} selected</span></div>
+              <label className="field-label tournament-team-name">TEAM NAME<input value={team.name} onChange={(event) => updateDraftTeam(index, { name: event.target.value })} placeholder={`Team ${index + 1}`} maxLength={40} /></label>
+              <fieldset className="tournament-player-picker">
+                <legend>Choose players</legend>
+                {members.length === 0 ? <p className="hint">Add players to the community roster first.</p> : <div className="tournament-player-options">{members.map((member) => {
+                  const selected = team.memberIds.includes(member.id);
+                  const used = assignedElsewhere.has(member.id);
+                  return <label className={`tournament-player-option${selected ? ' selected' : ''}${used ? ' unavailable' : ''}`} key={member.id}>
+                    <input type="checkbox" checked={selected} disabled={used} onChange={() => updateDraftTeam(index, { memberIds: selected ? team.memberIds.filter((id) => id !== member.id) : [...team.memberIds, member.id] })} />
+                    <span>{member.name}</span>
+                    {used && <small>Assigned</small>}
+                  </label>;
+                })}</div>}
+              </fieldset>
+              {tournamentTeams.length > 2 && <button type="button" className="text-button remove-tournament-team" onClick={() => setTournamentTeams((current) => current.filter((_, teamIndex) => teamIndex !== index))}>Remove team</button>}
+            </div>;
+          })}</div>
           <button type="button" className="text-button" onClick={() => setTournamentTeams((current) => [...current, { name: `Team ${current.length + 1}`, memberIds: [] }])}>＋ Add team</button>
           <p className="hint">Select at least two players per team. Teams are distributed across groups automatically; you can move teams between groups after creation.</p>
           <button className="primary-btn submit-button" disabled={loading}>{loading ? 'Saving…' : 'Create tournament groups'} <span>↗</span></button>
