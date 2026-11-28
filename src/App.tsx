@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import type { FormEvent } from 'react';
 import { resolveAppRoute, type AppPage } from './navigation';
+import { api } from './lib/api';
+import { extractCode } from './lib/codes';
 import { ActionButton, SectionTabs, StatusMessage } from './components/ui';
 
 type SetGroup = { id: number; players: string[] };
@@ -20,40 +22,6 @@ type LeaderboardEntry = { memberId: string; name: string; wins: number; losses: 
 type Community = { slug: string; name: string; createdAt: string };
 type CommunityPayload = { community: Community; members: Member[]; matches: CommunityMatch[]; leaderboard: LeaderboardEntry[]; tournaments: Tournament[]; access: { role: 'OWNER' | 'ADMIN' | 'VIEWER' } };
 
-const API_BASE_URL = (import.meta.env.DEV ? (import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000') : '').replace(/\/+$/, '');
-
-const api = async <T,>(url: string, options?: RequestInit): Promise<T> => {
-  const response = await fetch(`${API_BASE_URL}${url}`, {
-    ...options,
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-  });
-  const body = await response.text();
-  let data: unknown;
-  try {
-    data = body ? JSON.parse(body) : {};
-  } catch {
-    const preview = body.replace(/\s+/g, ' ').slice(0, 180);
-    const configurationHint = API_BASE_URL ? '' : ' Check that the Vercel /api rewrite points to the Render backend.';
-    throw new Error(`API returned non-JSON (HTTP ${response.status}).${configurationHint} Response: ${preview || '(empty response)'}`);
-  }
-  if (!response.ok) {
-    const message = typeof data === 'object' && data !== null && 'error' in data && typeof data.error === 'string'
-      ? data.error
-      : `Request failed (HTTP ${response.status}).`;
-    throw new Error(message);
-  }
-  return data as T;
-};
-
-function extractCode(value: string, kind: 'set' | 'community') {
-  let slug = value.trim();
-  try {
-    if (slug.includes('://')) slug = new URL(slug).pathname.split('/').filter(Boolean).at(-1) || '';
-  } catch { return ''; }
-  slug = slug.replace(new RegExp('^' + kind + '/'), '').trim();
-  return /^[a-zA-Z0-9_-]{6,40}$/.test(slug) ? slug : '';
-}
 
 export default function App() {
   const [page, setPageState] = useState<AppPage>(() => resolveAppRoute(window.location.pathname).page);
