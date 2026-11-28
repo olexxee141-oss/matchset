@@ -9,19 +9,23 @@ import { LiveMatchCard } from './components/LiveMatchCard';
 
 type SetGroup = { id: number; players: string[] };
 type Session = { id: string; name: string; players: string[]; playersPerSet: number; sets: SetGroup[]; createdAt: string; updatedAt: string };
-type Member = { id: string; name: string; joined_at?: string; role?: 'MEMBER' | 'ADMIN' };
-type TournamentTeam = { id: string; name: string; members: Array<{ id: string; name: string }> };
+type Member = { id: string; name: string; memberCode: string; joined_at?: string; role?: 'MEMBER' | 'ADMIN' };
+type TournamentTeam = { id: string; name: string; members: Array<{ id: string; name: string; memberCode?: string }> };
 type TournamentGroup = { id: string; name: string; teams: TournamentTeam[] };
 type Tournament = { id: string; name: string; createdAt: string; groups: TournamentGroup[] };
 type DraftTournamentTeam = { name: string; memberIds: string[] };
-type Team = { id: number; players: Array<{ id: string; name: string }> };
+type Team = { id: number; players: Array<{ id: string; name: string; memberCode?: string }> };
 type RotationGoal = { teamId: number; scorerId: string; scorerName: string; assisterId: string | null; assisterName: string | null; scoredAt: string };
 type RotationGame = { number: number; teamAId: number; teamBId: number; outcome: 'TEAM_A_WIN' | 'TEAM_B_WIN' | 'DRAW'; winnerTeamId: number | null; playedAt: string; goals?: RotationGoal[]; score?: [number, number] };
 type RotationState = { status: 'ACTIVE' | 'ENDED'; activeTeamIds: number[]; waitingTeamIds: number[]; games: RotationGame[]; goalsToWin?: number; durationSeconds?: number; score?: [number, number]; goals?: RotationGoal[]; timerStartedAt?: string; timerPausedAt?: string | null; pausedRemainingMs?: number | null };
 type CommunityMatch = { id: string; title: string; teams: Team[]; winningTeamId: number | null; rotationState?: RotationState | null; createdAt: string; completedAt: string | null };
-type LeaderboardEntry = { memberId: string; name: string; wins: number; losses: number; draws?: number; matchesPlayed: number; winRate: number };
+type LeaderboardEntry = { memberId: string; name: string; memberCode?: string; wins: number; losses: number; draws?: number; matchesPlayed: number; winRate: number };
 type Community = { slug: string; name: string; createdAt: string };
 type CommunityPayload = { community: Community; members: Member[]; matches: CommunityMatch[]; leaderboard: LeaderboardEntry[]; tournaments: Tournament[]; access: { role: 'OWNER' | 'ADMIN' | 'VIEWER' } };
+
+function memberLabel(member: { name: string; memberCode?: string }) {
+  return member.memberCode ? `${member.name} · ${member.memberCode}` : member.name;
+}
 
 
 export default function App() {
@@ -152,10 +156,15 @@ export default function App() {
     setLoading(true); setError(''); setNotice('');
     try {
       const url = new URL(window.location.href);
-      const invitedAdminToken = url.searchParams.get('adminToken');
+      // Capability secrets belong in the URL fragment, never the query string.
+      const fragmentParams = new URLSearchParams(url.hash.replace(/^#/, ''));
+      // Accept older query-string invitations once, then immediately scrub the secret.
+      const invitedAdminToken = fragmentParams.get('adminToken') || url.searchParams.get('adminToken');
       if (invitedAdminToken) {
         localStorage.setItem(`matchset-admin:${slug}`, invitedAdminToken);
+        fragmentParams.delete('adminToken');
         url.searchParams.delete('adminToken');
+        url.hash = fragmentParams.toString();
         window.history.replaceState({}, '', url.pathname + url.search + url.hash);
       }
       const savedOwnerToken = localStorage.getItem(`matchset-community-owner:${slug}`) || '';
@@ -302,7 +311,7 @@ export default function App() {
         const result = await api<{ role: string; adminToken: string }>(`/api/communities/${community.slug}/members/${member.id}/admin`, {
           method: 'POST', body: JSON.stringify({ ownerToken }),
         });
-        const invite = `${window.location.origin}/community/${community.slug}?adminToken=${encodeURIComponent(result.adminToken)}`;
+        const invite = `${window.location.origin}/community/${community.slug}#adminToken=${encodeURIComponent(result.adminToken)}`;
         setAdminInviteLink(invite);
         await loadCommunity(community.slug);
         setNotice(`Admin access created for ${member.name}. Share the private admin link with them.`);
@@ -751,7 +760,7 @@ export default function App() {
         <form className="community-form" onSubmit={createCommunityMatch}>
           <label className="field-label">MATCH NAME<input value={matchTitle} onChange={(e) => setMatchTitle(e.target.value)} placeholder="e.g. Saturday evening games" maxLength={80} required /></label>
           <div className="roster-heading"><span className="field-label">SELECT PLAYERS ({selectedMemberIds.length} SELECTED)</span><button type="button" className="text-button" onClick={() => setSelectedMemberIds(selectedMemberIds.length === members.length ? [] : members.map((member) => member.id))}>{selectedMemberIds.length === members.length ? 'Clear all' : 'Select all'}</button></div>
-          <div className="roster-select">{members.map((member) => <label className="roster-option" key={member.id}><input type="checkbox" checked={selectedMemberIds.includes(member.id)} onChange={() => toggleMember(member.id)} disabled={member.id === currentMemberId} /><span>{member.name}</span></label>)}</div>
+          <div className="roster-select">{members.map((member) => <label className="roster-option" key={member.id}><input type="checkbox" checked={selectedMemberIds.includes(member.id)} onChange={() => toggleMember(member.id)} disabled={member.id === currentMemberId} /><span>{memberLabel(member)}</span></label>)}</div>
           <div className="form-bottom"><label className="size-label">PLAYERS PER TEAM<select value={playersPerTeam} onChange={(e) => setPlayersPerTeam(Number(e.target.value))}>{Array.from({ length: 19 }, (_, i) => i + 2).map((n) => <option key={n} value={n}>{n} players</option>)}</select></label><span className="count">{Math.ceil(selectedMemberIds.length / playersPerTeam)} TEAMS</span></div>
           <div className="form-bottom"><label className="size-label">GOALS TO WIN<select value={goalsToWin} onChange={(e) => setGoalsToWin(Number(e.target.value))}>{[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n} goal{n === 1 ? '' : 's'}</option>)}</select></label><label className="size-label">TIME PER GAME<select value={durationMinutes} onChange={(e) => setDurationMinutes(Number(e.target.value))}>{[5, 10, 15, 20, 25, 30, 45, 60].map((n) => <option key={n} value={n}>{n} minutes</option>)}</select></label></div>
           <p className="hint">Teams are balanced automatically. Each rotation game ends at the goal target or when its timer expires. Every selected player is assigned exactly once.</p>
@@ -763,14 +772,14 @@ export default function App() {
           <div className="panel-heading"><div><span className="section-kicker">ALL-TIME</span><h2>Leaderboard</h2></div></div>
           {leaderboard.length === 0 ? <p className="empty-state">No results yet. Record a match winner to start the leaderboard.</p> : <div className="leaderboard">
             <div className="leader-row leader-head"><span>PLAYER</span><span>W</span><span>D</span><span>L</span><span>WIN %</span></div>
-            {leaderboard.map((entry, index) => <div className="leader-row" key={entry.memberId}><span><b>{String(index + 1).padStart(2, '0')}</b>{entry.name}</span><strong>{entry.wins}</strong><span>{entry.draws || 0}</span><span>{entry.losses}</span><span>{entry.winRate}%</span></div>)}
+            {leaderboard.map((entry, index) => <div className="leader-row" key={entry.memberId}><span><b>{String(index + 1).padStart(2, '0')}</b>{memberLabel(entry)}</span><strong>{entry.wins}</strong><span>{entry.draws || 0}</span><span>{entry.losses}</span><span>{entry.winRate}%</span></div>)}
           </div>}
         </section>
         <section className="community-panel">
           <div className="panel-heading"><div><span className="section-kicker">ROSTER</span><h2>Players</h2></div><span className="count">{members.length} MEMBERS</span></div>
-          <div className="member-list">{members.map((member) => <div className="member-item" key={member.id}><span className="member-avatar">{member.name.slice(0,1).toUpperCase()}</span>{member.name}{member.id === currentMemberId && <span className="you-label">CREATOR</span>}</div>)}</div>
+          <div className="member-list">{members.map((member) => <div className="member-item" key={member.id}><span className="member-avatar">{member.name.slice(0,1).toUpperCase()}</span>{memberLabel(member)}{member.id === currentMemberId && <span className="you-label">CREATOR</span>}</div>)}</div>
           {isOwner && <form className="add-member-form" onSubmit={addMember}><input value={newMemberName} onChange={(e) => setNewMemberName(e.target.value)} placeholder="Add a player to the roster" maxLength={40} required /><button className="share-btn" disabled={loading}>Add player</button></form>}
-          {isOwner && <div className="role-management"><span className="field-label">COMMUNITY ROLES</span>{members.filter((member) => member.id !== currentMemberId).map((member) => <div className="role-row" key={member.id}><span>{member.name}<small>{member.role === 'ADMIN' ? 'ADMIN' : 'MEMBER'}</small></span><button className="text-button" disabled={loading} onClick={() => void changeMemberRole(member)}>{member.role === 'ADMIN' ? 'Remove admin' : 'Make admin'}</button></div>)}</div>}
+          {isOwner && <div className="role-management"><span className="field-label">COMMUNITY ROLES</span>{members.filter((member) => member.id !== currentMemberId).map((member) => <div className="role-row" key={member.id}><span>{memberLabel(member)}<small>{member.role === 'ADMIN' ? 'ADMIN' : 'MEMBER'}</small></span><button className="text-button" disabled={loading} onClick={() => void changeMemberRole(member)}>{member.role === 'ADMIN' ? 'Remove admin' : 'Make admin'}</button></div>)}</div>}
           {!isOwner && <p className="read-only-note">Roster and roles are managed by the community owner.</p>}
           {adminInviteLink && <div className="admin-invite"><strong>Private admin access link</strong><p>Send this link directly to the appointed admin. Anyone with it can manage tournament groups until the owner revokes their role.</p><div><input readOnly value={adminInviteLink} /><button className="share-btn" onClick={() => void copyText(adminInviteLink, 'Admin link copied.')}>Copy link</button></div></div>}
         </section>
@@ -809,7 +818,7 @@ export default function App() {
           <div className="panel-heading"><div><span className="section-kicker">TOURNAMENT</span><h3>{tournament.name}</h3></div><span className="count">{tournament.groups.length} GROUPS</span></div>
           <div className="tournament-groups">{tournament.groups.map((group) => <div className="tournament-group" key={group.id}>
             <h4>{group.name}</h4>
-            {group.teams.map((team) => <div className="tournament-team" key={team.id}><span><strong>{team.name}</strong><small>{team.members.map((member) => member.name).join(' · ')}</small></span>
+            {group.teams.map((team) => <div className="tournament-team" key={team.id}><span><strong>{team.name}</strong><small>{team.members.map((member) => memberLabel(member)).join(' · ')}</small></span>
               {canManageTournaments && <select aria-label={`Move ${team.name} to group`} value={group.id} disabled={loading} onChange={(event) => void moveTournamentTeam(tournament, team.id, event.target.value)}>{tournament.groups.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}</select>}
             </div>)}
           </div>)}</div>
