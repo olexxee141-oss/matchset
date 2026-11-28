@@ -6,9 +6,11 @@ Status: approved product direction; implementation not yet enabled.
 
 MatchSet will introduce a lightweight shared account. A person has one global identity and may hold independent memberships in multiple communities. Community membership is the source of community-scoped display names, status, and permissions.
 
+Authentication will use passkeys as the normal sign-in method, with a one-time recovery code as the account recovery factor. MatchSet will not retain users' email addresses.
+
 ## Identity invariants
 
-- A global user has a stable opaque `user_id`; email is a verified login identifier, not a public identifier.
+- A global user has a stable opaque `user_id`; it is never a display name or email address.
 - A user can belong to many communities.
 - Each community membership has its own stable `membership_id`, display name, status, and community-scoped role.
 - Display names are not unique and must never be used as foreign keys, authorization subjects, or leaderboard aggregation keys.
@@ -17,13 +19,18 @@ MatchSet will introduce a lightweight shared account. A person has one global id
 - Match participation, goals, assists, leaderboard rows, and audit records must resolve through stable membership IDs.
 - Existing unclaimed roster rows must not be linked to an account by matching names or email guesses.
 
-## Authentication experience
+## Authentication and recovery
 
-- Passwordless email sign-in with verified email.
-- Keep onboarding minimal: authenticate, then join/create a community or claim an existing membership.
-- No KYC, social graph, public profile requirement, or mandatory profile completion.
+- Passkeys (WebAuthn) are the normal account sign-in method. Store only the credential public key and required credential metadata; never store a passkey private key.
+- A user may register more than one passkey, so losing one device does not automatically lock them out.
+- At account creation, generate a high-entropy, single-use recovery code. Show it once and require the user to save it before finishing setup.
+- Store only a strong hash of the recovery code. Never log it, return it again, or store it in plaintext.
+- Recovery requires the recovery code plus an email address supplied at the time of recovery. Send a short-lived, single-use verification link to that address; the address is a delivery destination only, not an account identifier.
+- Do not persist the supplied email address in the user profile, login identity table, or permanent audit metadata. Avoid retaining it in application logs, analytics, or error traces. The recovery request should store only a challenge hash, expiry, attempt limits, and the account reference; email delivery happens immediately through a provider adapter.
+- After successful recovery, require the user to register a new passkey and issue a replacement recovery code. Revoke existing sessions and allow the user to review/revoke old passkeys.
+- Email by itself cannot identify or recover an account. If both all passkeys and the recovery code are lost, the user cannot use email alone to prove account ownership. A separate community-governance recovery process must be designed before launch; it must not silently grant account access.
+- No password login, persistent email login, KYC, social login, or mandatory profile completion in the initial release.
 - Sessions must be revocable and stored in secure, HttpOnly, SameSite cookies where the deployment topology permits. Do not persist bearer credentials in localStorage.
-- Email delivery configuration is a deployment prerequisite. Authentication must fail closed when verification is unavailable.
 
 ## Community navigation
 
@@ -44,12 +51,12 @@ MatchSet will introduce a lightweight shared account. A person has one global id
 ## Delivery phases
 
 1. Audit current schema, route authorization, token issuance/storage, match/goal/assist identity references, and frontend local storage.
-2. Add additive global users, verified login identities, sessions, memberships, and claim-invitation schema. No destructive migration.
-3. Implement passwordless verification, secure session lifecycle, CSRF protection where cookie auth is used, rate limits, and account recovery.
+2. Add additive global users, passkey credentials, recovery challenges, sessions, memberships, and claim-invitation schema. Do not add a persistent email identity table.
+3. Implement WebAuthn registration/authentication, secure session lifecycle, recovery-code issuance and hashing, one-time email delivery for recovery, CSRF protection where cookie auth is used, and rate limits.
 4. Add authenticated My Communities and invite-based joining.
 5. Add owner-initiated roster claim flow and owner account claiming.
 6. Migrate authorization to account + membership IDs; keep legacy credentials during a measured compatibility window.
-7. Remove legacy access only after every existing community has a verified owner and recovery path.
+7. Remove legacy access only after every existing community has a verified owner and tested recovery path.
 
 ## Security and acceptance criteria
 
@@ -58,10 +65,12 @@ MatchSet will introduce a lightweight shared account. A person has one global id
 - Duplicate display names are supported in the same community.
 - One account can have multiple memberships and different names/roles in each.
 - Revoking a membership or role takes effect on the next server request.
-- Session rotation, logout, global session revocation, email verification expiry, replay protection, and rate limiting are tested.
-- No raw login token, session secret, or legacy organiser token is logged.
-- No production migration or deployment occurs until migration tests, CI, and the email provider configuration are verified.
+- Passkey challenge origin/RP ID, expiry, one-time use, signature verification, and replay protections are tested.
+- Recovery code entropy, one-time use, hashing, attempt limits, email-link expiry, replay protection, session revocation, and recovery rate limits are tested.
+- No persistent email address is stored. Email supplied for recovery is transient delivery input only and must not enter logs or analytics.
+- No raw recovery code, challenge token, session secret, or legacy organiser token is logged.
+- No production migration or deployment occurs until migration tests, CI, and the email delivery provider configuration are verified.
 
 ## Explicit non-goals
 
-No KYC, wallet/payment feature, social feed, public follower graph, or cross-community role inheritance.
+No KYC, wallet/payment feature, social feed, public follower graph, persistent email identity, or cross-community role inheritance.
