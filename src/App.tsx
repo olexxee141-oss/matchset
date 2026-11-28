@@ -9,8 +9,10 @@ type TournamentGroup = { id: string; name: string; teams: TournamentTeam[] };
 type Tournament = { id: string; name: string; createdAt: string; groups: TournamentGroup[] };
 type DraftTournamentTeam = { name: string; memberIds: string[] };
 type Team = { id: number; players: Array<{ id: string; name: string }> };
-type CommunityMatch = { id: string; title: string; teams: Team[]; winningTeamId: number | null; createdAt: string; completedAt: string | null };
-type LeaderboardEntry = { memberId: string; name: string; wins: number; losses: number; matchesPlayed: number; winRate: number };
+type RotationGame = { number: number; teamAId: number; teamBId: number; outcome: 'TEAM_A_WIN' | 'TEAM_B_WIN' | 'DRAW'; winnerTeamId: number | null; playedAt: string };
+type RotationState = { status: 'ACTIVE' | 'ENDED'; activeTeamIds: number[]; waitingTeamIds: number[]; games: RotationGame[] };
+type CommunityMatch = { id: string; title: string; teams: Team[]; winningTeamId: number | null; rotationState?: RotationState | null; createdAt: string; completedAt: string | null };
+type LeaderboardEntry = { memberId: string; name: string; wins: number; losses: number; draws?: number; matchesPlayed: number; winRate: number };
 type Community = { slug: string; name: string; createdAt: string };
 type CommunityPayload = { community: Community; members: Member[]; matches: CommunityMatch[]; leaderboard: LeaderboardEntry[]; tournaments: Tournament[]; access: { role: 'OWNER' | 'ADMIN' | 'VIEWER' } };
 
@@ -344,18 +346,33 @@ export default function App() {
     finally { setLoading(false); }
   }
 
-  async function recordWinner(match: CommunityMatch, teamId: number) {
+  async function recordRotationOutcome(match: CommunityMatch, outcome: 'TEAM_A_WIN' | 'TEAM_B_WIN' | 'DRAW') {
     if (!community) return;
     const resultToken = localStorage.getItem(`matchset-result:${match.id}`) || '';
     if (!resultToken) { setError('Only the organiser who created this match can record its result.'); return; }
     setError(''); setLoading(true);
     try {
-      await api<{ match: CommunityMatch }>(`/api/communities/${community.slug}/matches/${match.id}/result`, {
-        method: 'POST', body: JSON.stringify({ resultToken, winningTeamId: teamId }),
+      await api<{ match: CommunityMatch }>(`/api/communities/${community.slug}/matches/${match.id}/rotation/result`, {
+        method: 'POST', body: JSON.stringify({ resultToken, outcome }),
       });
       await loadCommunity(community.slug);
-      setNotice('Result saved. Winning players received a community win.');
-    } catch (e) { setError(e instanceof Error ? e.message : 'Could not record result.'); }
+      setNotice(outcome === 'DRAW' ? 'Draw recorded. Both teams rotated out.' : 'Result recorded. The winning team stays on.');
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not record this result.'); }
+    finally { setLoading(false); }
+  }
+
+  async function undoRotationOutcome(match: CommunityMatch) {
+    if (!community) return;
+    const resultToken = localStorage.getItem(`matchset-result:${match.id}`) || '';
+    if (!resultToken) { setError('Only the organiser who created this match can undo its result.'); return; }
+    setError(''); setLoading(true);
+    try {
+      await api<{ match: CommunityMatch }>(`/api/communities/${community.slug}/matches/${match.id}/rotation/undo`, {
+        method: 'POST', body: JSON.stringify({ resultToken }),
+      });
+      await loadCommunity(community.slug);
+      setNotice('The latest result was undone and the previous lineup restored.');
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not undo the latest result.'); }
     finally { setLoading(false); }
   }
 
@@ -430,7 +447,7 @@ export default function App() {
       <div className="community-stats">
         <div><strong>{members.length}</strong><span>PLAYERS</span></div>
         <div><strong>{matches.length}</strong><span>MATCHES</span></div>
-        <div><strong>{matches.filter((match) => match.winningTeamId !== null).length}</strong><span>RESULTS</span></div>
+        <div><strong>{matches.reduce((total, match) => total + (match.rotationState?.games.length ?? (match.winningTeamId !== null ? 1 : 0)), 0)}</strong><span>RESULTS</span></div>
       </div>
       <nav className="community-tabs" aria-label="Community sections">
         <button className={communityTab === 'overview' ? 'active' : ''} onClick={() => setCommunityTab('overview')}>Overview</button>
@@ -453,8 +470,8 @@ export default function App() {
         <section className="community-panel">
           <div className="panel-heading"><div><span className="section-kicker">ALL-TIME</span><h2>Leaderboard</h2></div></div>
           {leaderboard.length === 0 ? <p className="empty-state">No results yet. Record a match winner to start the leaderboard.</p> : <div className="leaderboard">
-            <div className="leader-row leader-head"><span>PLAYER</span><span>W</span><span>L</span><span>WIN %</span></div>
-            {leaderboard.map((entry, index) => <div className="leader-row" key={entry.memberId}><span><b>{String(index + 1).padStart(2, '0')}</b>{entry.name}</span><strong>{entry.wins}</strong><span>{entry.losses}</span><span>{entry.winRate}%</span></div>)}
+            <div className="leader-row leader-head"><span>PLAYER</span><span>W</span><span>D</span><span>L</span><span>WIN %</span></div>
+            {leaderboard.map((entry, index) => <div className="leader-row" key={entry.memberId}><span><b>{String(index + 1).padStart(2, '0')}</b>{entry.name}</span><strong>{entry.wins}</strong><span>{entry.draws || 0}</span><span>{entry.losses}</span><span>{entry.winRate}%</span></div>)}
           </div>}
         </section>
         <section className="community-panel">
@@ -496,10 +513,21 @@ export default function App() {
         {matches.length === 0 ? <p className="empty-state">No matches yet. The community creator can create the first one.</p> : <div className="match-history">
           {matches.map((match) => {
             const resultToken = localStorage.getItem('matchset-result:' + match.id) || '';
+            const rotation = match.rotationState;
+            const activeTeams = rotation?.activeTeamIds.map((id) => match.teams.find((team) => team.id === id)).filter((team): team is Team => Boolean(team)) || [];
+            const waitingTeams = rotation?.waitingTeamIds.map((id) => match.teams.find((team) => team.id === id)).filter((team): team is Team => Boolean(team)) || [];
             return <article className="history-match" key={match.id}>
-              <div className="history-match-head"><div><h3>{match.title}</h3><span>{new Date(match.createdAt).toLocaleDateString()} · {match.teams.length} teams</span></div><span className={match.winningTeamId ? 'result-status complete' : 'result-status'}>{match.winningTeamId ? 'TEAM ' + match.winningTeamId + ' WON' : 'AWAITING RESULT'}</span></div>
-              <div className="history-teams">{match.teams.map((team) => <div className={match.winningTeamId === team.id ? 'history-team winner' : 'history-team'} key={team.id}><div><b>TEAM {team.id}</b>{match.winningTeamId === team.id && <span>WINNER</span>}</div><p>{team.players.map((player) => player.name).join(' · ')}</p>{isOwner && !match.winningTeamId && resultToken && <button className="record-win-btn" onClick={() => void recordWinner(match, team.id)} disabled={loading}>Record as winner</button>}</div>)}</div>
-              {isOwner && !match.winningTeamId && !resultToken && <p className="hint">The creator can record the result from the device used to create this match.</p>}
+              <div className="history-match-head"><div><h3>{match.title}</h3><span>{new Date(match.createdAt).toLocaleDateString()} · {match.teams.length} teams · {rotation ? rotation.games.length + ' games played' : 'Legacy match'}</span></div><span className={rotation || match.winningTeamId ? 'result-status complete' : 'result-status'}>{rotation ? 'ROTATION ACTIVE' : match.winningTeamId ? 'TEAM ' + match.winningTeamId + ' WON' : 'AWAITING RESULT'}</span></div>
+              {rotation ? <>
+                <div className="rotation-current"><div className="rotation-label">ON THE PITCH · NEXT GAME</div>
+                  <div className="history-teams">{activeTeams.map((team, index) => <div className="history-team active-team" key={team.id}><div><b>SET {team.id}</b><span>{index === 0 ? 'TEAM A' : 'TEAM B'}</span></div><p>{team.players.map((player) => player.name).join(' · ')}</p></div>)}</div>
+                  {isOwner && resultToken && <div className="rotation-controls"><button className="record-win-btn" disabled={loading || activeTeams.length !== 2} onClick={() => void recordRotationOutcome(match, 'TEAM_A_WIN')}>Set A wins</button><button className="record-win-btn draw-btn" disabled={loading || activeTeams.length !== 2} onClick={() => void recordRotationOutcome(match, 'DRAW')}>Draw</button><button className="record-win-btn" disabled={loading || activeTeams.length !== 2} onClick={() => void recordRotationOutcome(match, 'TEAM_B_WIN')}>Set B wins</button></div>}
+                </div>
+                <div className="rotation-queue"><strong>WAITING QUEUE</strong><span>{waitingTeams.length ? waitingTeams.map((team) => 'Set ' + team.id).join(' · ') : 'No teams waiting — next rotation will bring teams back in.'}</span></div>
+                {rotation.games.length > 0 && <div className="rotation-last-game"><span>LAST RESULT</span><strong>{rotation.games[rotation.games.length - 1].outcome === 'DRAW' ? 'Draw' : 'Set ' + rotation.games[rotation.games.length - 1].winnerTeamId + ' won'}</strong>{isOwner && resultToken && <button className="text-button" disabled={loading} onClick={() => void undoRotationOutcome(match)}>Undo last result</button>}</div>}
+                <details className="rotation-history"><summary>Game history ({rotation.games.length})</summary>{rotation.games.length === 0 ? <p className="hint">No games recorded yet.</p> : <ol>{rotation.games.map((game) => <li key={game.number}>Game {game.number}: Set {game.teamAId} vs Set {game.teamBId} — {game.outcome === 'DRAW' ? 'Draw' : 'Set ' + game.winnerTeamId + ' won'}</li>)}</ol>}</details>
+                {!isOwner && <p className="read-only-note">The organiser records results and controls rotation.</p>}
+              </> : <div className="history-teams">{match.teams.map((team) => <div className={match.winningTeamId === team.id ? 'history-team winner' : 'history-team'} key={team.id}><div><b>TEAM {team.id}</b>{match.winningTeamId === team.id && <span>WINNER</span>}</div><p>{team.players.map((player) => player.name).join(' · ')}</p></div>)}</div>}
             </article>;
           })}
         </div>}

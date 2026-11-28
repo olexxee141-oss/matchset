@@ -9,7 +9,8 @@ A lightweight PWA for arranging players into balanced teams, sharing links, and 
 - Share a public, read-only community link with invitees.
 - The creator maintains the persistent, community-specific player roster; invitees cannot add or edit players.
 - Create matches from roster members; teams are balanced automatically.
-- Record one winning team per match.
+- Start each community match with Set 1 vs Set 2, then rotate using winner-stays rules: winner stays, loser joins the back of the queue; after a draw both teams join the back and the next two teams enter.
+- Record every game (wins and draws), view the waiting queue and game history, and undo the latest result.
 - View the latest 100 matches and an all-time leaderboard with wins, losses, matches played, and win rate.
 - Every player on the winning team receives one win. A match result can only be recorded once.
 
@@ -22,7 +23,7 @@ A lightweight PWA for arranging players into balanced teams, sharing links, and 
 
 ## Stack
 
-React + TypeScript + Vite, Express, and Neon PostgreSQL. One deployable app; no accounts, queues, microservices, or PlayGeng dependency.
+React + TypeScript + Vite, Express, and Neon PostgreSQL. One lightweight frontend and API; no account system, microservices, or PlayGeng dependency.
 
 ## Important MVP limitations
 
@@ -30,7 +31,7 @@ React + TypeScript + Vite, Express, and Neon PostgreSQL. One deployable app; no 
 - Invite links are read-only. Only the creator's organiser token can add roster members or create matches.
 - The community organiser token and match result tokens are stored in the creator's browser localStorage. Losing that browser storage means losing the corresponding organiser/result permissions.
 - Community invite links are public. Anyone with the link can view the roster, leaderboard and match history, but cannot modify community data.
-- The organiser creates matches; the device that created each match records its result. Results are immutable after submission in this MVP.
+- The organiser creates matches; the device that created each match records rotation results and can undo the latest result. Rotation state and game history are stored in the backend.
 - Match history displays the latest 100 matches; the leaderboard is calculated across all completed matches.
 
 ## Neon setup
