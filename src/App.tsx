@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import type { FormEvent } from 'react';
 import { resolveAppRoute, type AppPage } from './navigation';
-import { ActionButton, SectionTabs } from './components/ui';
+import { ActionButton, SectionTabs, StatusMessage } from './components/ui';
 
 type SetGroup = { id: number; players: string[] };
 type Session = { id: string; name: string; players: string[]; playersPerSet: number; sets: SetGroup[]; createdAt: string; updatedAt: string };
@@ -632,7 +632,7 @@ export default function App() {
       </div>
       {showViewInput && <form className="lookup-form" onSubmit={(event) => { event.preventDefault(); void loadSession(viewLink); }}><label htmlFor="view-link">PASTE THE SHARED LINK OR SET CODE</label><div><input id="view-link" value={viewLink} onChange={(event) => setViewLink(event.target.value)} placeholder="https://…/set/abc123" autoFocus /><button className="primary-btn lookup-button" disabled={loading}>Open set ↗</button></div></form>}
       <div className="hero-foot"><span>NO ACCOUNT NEEDED</span><span>·</span><span>COMMUNITY HISTORY</span><span>·</span><span>SHARE INSTANTLY</span></div>
-      {error && <p className="error">{error}</p>}
+      {error && <StatusMessage tone="error">{error}</StatusMessage>}
     </section>}
 
     {page === 'account' && <section className="workspace account-workspace">
@@ -679,14 +679,14 @@ export default function App() {
           {recoveryMessage && <p className="success-note">{recoveryMessage}</p>}
         </form>
       </>}
-      {error && <p className="error">{error}</p>}
+      {error && <StatusMessage tone="error">{error}</StatusMessage>}
     </section>}
 
     {page === 'recover' && <section className="workspace account-workspace">
       <div className="section-kicker">ACCOUNT RECOVERY</div><h1 className="page-title">Restore your <em>access.</em></h1>
       <p className="subcopy">Your email link is valid for a short time. Continue to register a new passkey, then save the replacement recovery code.</p>
       <button className="primary-btn submit-button" disabled={accountBusy || !recoveryLinkToken} onClick={() => void completeAccountRecovery()}>{accountBusy ? 'Verifying…' : 'Verify and register new passkey'} <span>↗</span></button>
-      {error && <p className="error">{error}</p>}
+      {error && <StatusMessage tone="error">{error}</StatusMessage>}
     </section>}
 
     {page === 'create-community' && <section className="workspace">
@@ -699,7 +699,7 @@ export default function App() {
         <p className="hint">You become the community organiser. Keep your browser data safe: organiser permissions are stored on this device.</p>
         <button className="primary-btn submit-button" disabled={loading}>{loading ? 'Creating…' : 'Create community'} <span>↗</span></button>
       </form>
-      {error && <p className="error">{error}</p>}
+      {error && <StatusMessage tone="error">{error}</StatusMessage>}
     </section>}
 
     {page === 'join-community' && <section className="workspace">
@@ -711,7 +711,7 @@ export default function App() {
         <p className="hint">Invite links are read-only. Only the community creator can add players or manage matches.</p>
         <button className="primary-btn submit-button" disabled={loading}>{loading ? 'Opening…' : 'View community'} <span>↗</span></button>
       </form>
-      {error && <p className="error">{error}</p>}
+      {error && <StatusMessage tone="error">{error}</StatusMessage>}
     </section>}
 
     {page === 'community' && community && <section className="workspace community-workspace">
