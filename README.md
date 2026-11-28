@@ -23,7 +23,7 @@ A lightweight PWA for arranging players into balanced teams, sharing links, and 
 
 ## Stack
 
-React + TypeScript + Vite, Express, and Neon PostgreSQL. One deployable app; no accounts, queues, microservices, or PlayGeng dependency.
+React + TypeScript + Vite, Express, and Neon PostgreSQL. One lightweight frontend and API; no account system, microservices, or PlayGeng dependency.
 
 ## Important MVP limitations
 
