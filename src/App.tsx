@@ -14,6 +14,7 @@ type TournamentTeam = { id: string; name: string; members: Array<{ id: string; n
 type TournamentGroup = { id: string; name: string; teams: TournamentTeam[] };
 type Tournament = { id: string; name: string; createdAt: string; groups: TournamentGroup[] };
 type DraftTournamentTeam = { name: string; memberIds: string[] };
+type DraftTournamentGroup = { name: string; teams: DraftTournamentTeam[] };
 type Team = { id: number; players: Array<{ id: string; name: string; memberCode?: string }> };
 type RotationGoal = { teamId: number; scorerId: string; scorerName: string; assisterId: string | null; assisterName: string | null; scoredAt: string };
 type RotationGame = { number: number; teamAId: number; teamBId: number; outcome: 'TEAM_A_WIN' | 'TEAM_B_WIN' | 'DRAW'; winnerTeamId: number | null; playedAt: string; goals?: RotationGoal[]; score?: [number, number] };
@@ -53,8 +54,10 @@ export default function App() {
   });
   const [adminInviteLink, setAdminInviteLink] = useState('');
   const [tournamentName, setTournamentName] = useState('');
-  const [tournamentGroupCount, setTournamentGroupCount] = useState(2);
-  const [tournamentTeams, setTournamentTeams] = useState<DraftTournamentTeam[]>([{ name: 'Team 1', memberIds: [] }, { name: 'Team 2', memberIds: [] }]);
+  const [draftTournamentGroups, setDraftTournamentGroups] = useState<DraftTournamentGroup[]>([
+    { name: 'Group A', teams: [{ name: 'Team 1', memberIds: [] }] },
+    { name: 'Group B', teams: [{ name: 'Team 1', memberIds: [] }] },
+  ]);
   const [communityName, setCommunityName] = useState('');
   const [creatorName, setCreatorName] = useState('');
   const [joinCode, setJoinCode] = useState('');
@@ -152,7 +155,7 @@ export default function App() {
     finally { setLoading(false); }
   }
 
-  async function loadCommunity(slug: string, updateUrl = false) {
+  async function loadCommunity(slug: string, updateUrl = false, initialTab: 'overview' | 'tournaments' = 'overview') {
     setLoading(true); setError(''); setNotice('');
     try {
       const url = new URL(window.location.href);
@@ -189,7 +192,7 @@ export default function App() {
         localStorage.setItem('matchset-recent-communities', JSON.stringify(next));
         return next;
       });
-      setCommunityTab('overview');
+      setCommunityTab(initialTab);
       setCommunityMenuOpen(false);
       setPage('community');
       if (updateUrl) window.history.pushState({}, '', `/community/${slug}`);
@@ -320,24 +323,55 @@ export default function App() {
     finally { setLoading(false); }
   }
 
-  function updateDraftTeam(index: number, patch: Partial<DraftTournamentTeam>) {
-    setTournamentTeams((current) => current.map((team, teamIndex) => teamIndex === index ? { ...team, ...patch } : team));
+  function resizeDraftGroups(count: number) {
+    if (count < draftTournamentGroups.length) {
+      const removedGroups = draftTournamentGroups.slice(count);
+      const hasRegistration = removedGroups.some((group) => group.teams.some((team, index) =>
+        team.memberIds.length > 0 || team.name.trim() !== `Team ${index + 1}`));
+      if (hasRegistration) {
+        setError('Move or remove registrations from the last groups before reducing the group count.');
+        return;
+      }
+    }
+    setDraftTournamentGroups((current) => {
+      if (count <= current.length) return current.slice(0, count);
+      return [
+        ...current,
+        ...Array.from({ length: count - current.length }, (_, offset) => ({
+          name: `Group ${String.fromCharCode(65 + current.length + offset)}`,
+          teams: [{ name: 'Team 1', memberIds: [] }],
+        })),
+      ];
+    });
+    setError('');
+  }
+
+  function updateDraftTeam(groupIndex: number, teamIndex: number, patch: Partial<DraftTournamentTeam>) {
+    setDraftTournamentGroups((current) => current.map((group, index) => index === groupIndex
+      ? { ...group, teams: group.teams.map((team, itemIndex) => itemIndex === teamIndex ? { ...team, ...patch } : team) }
+      : group));
   }
 
   async function createTournament(event: FormEvent) {
     event.preventDefault();
     if (!community || !canManageTournaments) return;
-    const teams = tournamentTeams.filter((team) => team.name.trim() && team.memberIds.length >= 2);
-    if (teams.length < 2) { setError('Add at least two teams, with at least two community players per team.'); return; }
-    if (teams.some((team) => team.memberIds.length !== new Set(team.memberIds).size)) { setError('A player cannot appear twice in the same team.'); return; }
-    const allIds = teams.flatMap((team) => team.memberIds);
-    if (new Set(allIds).size !== allIds.length) { setError('Each player can only be assigned to one team in a tournament.'); return; }
-    const count = Math.min(tournamentGroupCount, teams.length);
-    const groups = Array.from({ length: count }, (_, index) => ({
-      name: `Group ${String.fromCharCode(65 + index)}`,
-      teams: [] as Array<{ name: string; memberIds: string[] }>,
+    const groups = draftTournamentGroups.map((group) => ({
+      name: group.name.trim(),
+      teams: group.teams.map((team) => ({ name: team.name.trim(), memberIds: team.memberIds })),
     }));
-    teams.forEach((team, index) => groups[index % count].teams.push({ name: team.name.trim(), memberIds: team.memberIds }));
+    if (groups.some((group) => !group.name || group.teams.length === 0)) {
+      setError('Every group needs a name and at least one team.'); return;
+    }
+    if (groups.some((group) => group.teams.some((team) => !team.name || team.memberIds.length < 2))) {
+      setError('Every team needs a name and at least two community players.'); return;
+    }
+    const allIds = groups.flatMap((group) => group.teams.flatMap((team) => team.memberIds));
+    if (new Set(allIds).size !== allIds.length) {
+      setError('A player can only be registered once across the entire tournament.'); return;
+    }
+    if (allIds.length < 4 || groups.reduce((total, group) => total + group.teams.length, 0) < 2) {
+      setError('Register at least two teams with at least two players each.'); return;
+    }
     setError(''); setLoading(true);
     try {
       await api(`/api/communities/${community.slug}/tournaments`, {
@@ -346,7 +380,10 @@ export default function App() {
         body: JSON.stringify({ name: tournamentName, groups, ...(isOwner ? { ownerToken } : {}) }),
       });
       setTournamentName('');
-      setTournamentTeams([{ name: 'Team 1', memberIds: [] }, { name: 'Team 2', memberIds: [] }]);
+      setDraftTournamentGroups([
+        { name: 'Group A', teams: [{ name: 'Team 1', memberIds: [] }] },
+        { name: 'Group B', teams: [{ name: 'Team 1', memberIds: [] }] },
+      ]);
       await loadCommunity(community.slug);
       setCommunityTab('tournaments');
       setNotice('Tournament groups created and saved.');
@@ -787,30 +824,38 @@ export default function App() {
       {communityTab === 'tournaments' && <div className="community-panel tournament-panel">
         <div className="panel-heading"><div><span className="section-kicker">COMPETITION MANAGEMENT</span><h2>Tournament groups</h2></div><span className="count">{tournaments.length} TOURNAMENTS</span></div>
         {canManageTournaments && <form className="community-form tournament-form" onSubmit={createTournament}>
-          <h3>Create tournament</h3>
+          <div className="tournament-form-intro"><div><span className="section-kicker">NEW COMPETITION</span><h3>Create tournament</h3></div><span className="count">{draftTournamentGroups.length} GROUPS</span></div>
           <label className="field-label">TOURNAMENT NAME<input value={tournamentName} onChange={(event) => setTournamentName(event.target.value)} placeholder="e.g. MatchSet Cup" maxLength={80} required /></label>
-          <label className="field-label">NUMBER OF GROUPS<select value={tournamentGroupCount} onChange={(event) => setTournamentGroupCount(Number(event.target.value))}>{[2, 3, 4, 5, 6, 8].map((count) => <option key={count} value={count}>{count} groups</option>)}</select></label>
-          <div className="tournament-draft-teams">{tournamentTeams.map((team, index) => {
-            const assignedElsewhere = new Set(tournamentTeams.flatMap((otherTeam, teamIndex) => teamIndex === index ? [] : otherTeam.memberIds));
-            return <div className="tournament-draft-team" key={index}>
-              <div className="tournament-team-heading"><span className="team-number">TEAM {index + 1}</span><span className="team-player-count">{team.memberIds.length} selected</span></div>
-              <label className="field-label tournament-team-name">TEAM NAME<input value={team.name} onChange={(event) => updateDraftTeam(index, { name: event.target.value })} placeholder={`Team ${index + 1}`} maxLength={40} /></label>
-              <fieldset className="tournament-player-picker">
-                <legend>Choose players</legend>
-                {members.length === 0 ? <p className="hint">Add players to the community roster first.</p> : <div className="tournament-player-options">{members.map((member) => {
-                  const selected = team.memberIds.includes(member.id);
-                  const used = assignedElsewhere.has(member.id);
-                  return <label className={`tournament-player-option${selected ? ' selected' : ''}${used ? ' unavailable' : ''}`} key={member.id}>
-                    <input type="checkbox" checked={selected} disabled={used} onChange={() => updateDraftTeam(index, { memberIds: selected ? team.memberIds.filter((id) => id !== member.id) : [...team.memberIds, member.id] })} />
-                    <span>{member.name}</span>
-                    {used && <small>Assigned</small>}
-                  </label>;
-                })}</div>}
-              </fieldset>
-              {tournamentTeams.length > 2 && <button type="button" className="text-button remove-tournament-team" onClick={() => setTournamentTeams((current) => current.filter((_, teamIndex) => teamIndex !== index))}>Remove team</button>}
-            </div>;
+          <label className="field-label">NUMBER OF GROUPS<select value={draftTournamentGroups.length} onChange={(event) => resizeDraftGroups(Number(event.target.value))}>{[2, 3, 4, 5, 6, 8].map((count) => <option key={count} value={count}>{count} groups</option>)}</select></label>
+          <div className="tournament-draft-groups">{draftTournamentGroups.map((group, groupIndex) => {
+            return <section className="tournament-draft-group" key={groupIndex}>
+              <div className="tournament-group-heading">
+                <label className="field-label">GROUP NAME<input value={group.name} onChange={(event) => setDraftTournamentGroups((current) => current.map((item, index) => index === groupIndex ? { ...item, name: event.target.value } : item))} maxLength={40} /></label>
+                <span className="count">{group.teams.length} TEAMS</span>
+              </div>
+              {group.teams.map((team, teamIndex) => {
+                const usedByOtherTeams = new Set(draftTournamentGroups.flatMap((otherGroup, otherGroupIndex) => otherGroup.teams.flatMap((otherTeam, otherTeamIndex) => otherGroupIndex === groupIndex && otherTeamIndex === teamIndex ? [] : otherTeam.memberIds)));
+                return <div className="tournament-draft-team" key={teamIndex}>
+                  <div className="tournament-team-heading"><span className="team-number">TEAM {teamIndex + 1}</span><span className="team-player-count">{team.memberIds.length} selected</span></div>
+                  <label className="field-label tournament-team-name">TEAM NAME<input value={team.name} onChange={(event) => updateDraftTeam(groupIndex, teamIndex, { name: event.target.value })} placeholder={`Team ${teamIndex + 1}`} maxLength={40} /></label>
+                  <fieldset className="tournament-player-picker">
+                    <legend>Choose players</legend>
+                    {members.length === 0 ? <p className="hint">Add players to the community roster first.</p> : <div className="tournament-player-options">{members.map((member) => {
+                      const selected = team.memberIds.includes(member.id);
+                      const used = usedByOtherTeams.has(member.id);
+                      return <label className={`tournament-player-option${selected ? ' selected' : ''}${used ? ' unavailable' : ''}`} key={member.id}>
+                        <input type="checkbox" checked={selected} disabled={used} onChange={() => updateDraftTeam(groupIndex, teamIndex, { memberIds: selected ? team.memberIds.filter((id) => id !== member.id) : [...team.memberIds, member.id] })} />
+                        <span>{memberLabel(member)}</span>
+                        {used && <small>Assigned</small>}
+                      </label>;
+                    })}</div>}
+                  </fieldset>
+                  {group.teams.length > 1 && <button type="button" className="text-button remove-tournament-team" onClick={() => setDraftTournamentGroups((current) => current.map((item, index) => index === groupIndex ? { ...item, teams: item.teams.filter((_, indexToRemove) => indexToRemove !== teamIndex) } : item))}>Remove team</button>}
+                </div>;
+              })}
+              <button type="button" className="text-button" onClick={() => setDraftTournamentGroups((current) => current.map((item, index) => index === groupIndex ? { ...item, teams: [...item.teams, { name: `Team ${item.teams.length + 1}`, memberIds: [] }] } : item))}>＋ Add team to {group.name}</button>
+            </section>;
           })}</div>
-          <button type="button" className="text-button" onClick={() => setTournamentTeams((current) => [...current, { name: `Team ${current.length + 1}`, memberIds: [] }])}>＋ Add team</button>
           <p className="hint">Select at least two players per team. Teams are distributed across groups automatically; you can move teams between groups after creation.</p>
           <button className="primary-btn submit-button" disabled={loading}>{loading ? 'Saving…' : 'Create tournament groups'} <span>↗</span></button>
         </form>}
