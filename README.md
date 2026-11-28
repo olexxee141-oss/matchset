@@ -112,7 +112,6 @@ For a local production-mode run, set `NODE_ENV=production` and `PORT` as needed.
 
 The app includes a web manifest and an installable app shell. The API remains online to load shared arrangements; offline viewing of uncached links is not promised.
 
-
 ## Communities, Admins and tournaments
 
 - **My Communities** keeps up to 12 recently opened communities in the current browser so users can return without finding the invite link again. This is device-local history, not account-based membership sync; clearing browser data or changing devices removes this shortcut.
@@ -120,3 +119,12 @@ The app includes a web manifest and an installable app shell. The API remains on
 - Admins can create tournaments, distribute teams across groups, and move teams between groups. They cannot manage the roster, appoint admins, create regular matches, or record match results.
 - Admin access is currently delivered through a private bearer link because MatchSet does not yet require user accounts. Share it only with the intended member; demoting that member revokes the token.
 - Tournament data and role changes are persisted in Neon. The backend migration is maintained in [MatchSet-backend](https://github.com/olexxee141-oss/Matchset-backend/tree/main/docs/migrations).
+
+## Offline support — planned, not implemented
+
+MatchSet is intended to support previously opened communities and match-session operations when the organiser temporarily loses internet access. The implementation has not started. The plan covers service-worker app-shell caching, IndexedDB snapshots and a durable ordered event queue, explicit pending-sync status, server idempotency/version checks, conflict recovery, and the limits of offline timer trust.
+
+- [Frontend offline behaviour, local storage and delivery phases](docs/offline-support.md)
+- [Backend sync protocol, idempotency and conflict handling](https://github.com/olexxee141-oss/Matchset-backend/blob/main/docs/offline-support.md)
+
+Offline results will remain provisional until the backend acknowledges them. The first release is limited to one controlling organiser device per match session; multi-device offline editing is out of scope.
