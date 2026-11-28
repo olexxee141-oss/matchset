@@ -445,7 +445,7 @@ export default function App() {
       <div className="community-stats">
         <div><strong>{members.length}</strong><span>PLAYERS</span></div>
         <div><strong>{matches.length}</strong><span>MATCHES</span></div>
-        <div><strong>{matches.filter((match) => match.winningTeamId !== null).length}</strong><span>RESULTS</span></div>
+        <div><strong>{matches.reduce((total, match) => total + (match.rotationState?.games.length ?? (match.winningTeamId !== null ? 1 : 0)), 0)}</strong><span>RESULTS</span></div>
       </div>
       <nav className="community-tabs" aria-label="Community sections">
         <button className={communityTab === 'overview' ? 'active' : ''} onClick={() => setCommunityTab('overview')}>Overview</button>
@@ -468,8 +468,8 @@ export default function App() {
         <section className="community-panel">
           <div className="panel-heading"><div><span className="section-kicker">ALL-TIME</span><h2>Leaderboard</h2></div></div>
           {leaderboard.length === 0 ? <p className="empty-state">No results yet. Record a match winner to start the leaderboard.</p> : <div className="leaderboard">
-            <div className="leader-row leader-head"><span>PLAYER</span><span>W</span><span>L</span><span>WIN %</span></div>
-            {leaderboard.map((entry, index) => <div className="leader-row" key={entry.memberId}><span><b>{String(index + 1).padStart(2, '0')}</b>{entry.name}</span><strong>{entry.wins}</strong><span>{entry.losses}</span><span>{entry.winRate}%</span></div>)}
+            <div className="leader-row leader-head"><span>PLAYER</span><span>W</span><span>D</span><span>L</span><span>WIN %</span></div>
+            {leaderboard.map((entry, index) => <div className="leader-row" key={entry.memberId}><span><b>{String(index + 1).padStart(2, '0')}</b>{entry.name}</span><strong>{entry.wins}</strong><span>{entry.draws || 0}</span><span>{entry.losses}</span><span>{entry.winRate}%</span></div>)}
           </div>}
         </section>
         <section className="community-panel">
