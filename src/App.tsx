@@ -207,7 +207,7 @@ export default function App() {
   useEffect(() => {
     const parts = window.location.pathname.split('/').filter(Boolean);
     if (parts[0] === 'recover' && parts[1] === 'verify') {
-      const linkToken = new URLSearchParams(window.location.search).get('token') || '';
+      const linkToken = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('token') || '';
       if (linkToken) { setRecoveryLinkToken(linkToken); setPage('recover'); return; }
     }
     if (parts[0] === 'set' && parts[1]) void loadSession(parts[1]);
@@ -501,6 +501,19 @@ export default function App() {
     finally { setAccountBusy(false); }
   }
 
+  async function rotateUnacknowledgedRecoveryCode() {
+    if (!accountCsrf) return;
+    setAccountBusy(true); setError('');
+    try {
+      const result = await api<{ recoveryCode: string }>('/api/auth/recovery-code/rotate', {
+        method: 'POST', headers: { 'X-CSRF-Token': accountCsrf }, body: '{}',
+      });
+      setRecoveryCode(result.recoveryCode);
+      setNotice('A replacement recovery code is ready. Save it before continuing.');
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not replace the recovery code.'); }
+    finally { setAccountBusy(false); }
+  }
+
   async function acknowledgeRecoveryCode() {
     if (!recoveryCode || !accountCsrf) return;
     setAccountBusy(true); setError('');
@@ -608,7 +621,11 @@ export default function App() {
           <button className="secondary-btn" onClick={() => void copyText(recoveryCode, 'Recovery code copied. Store it somewhere private.')}>Copy recovery code</button>
           <button className="primary-btn submit-button" disabled={accountBusy} onClick={() => void acknowledgeRecoveryCode()}>I saved my recovery code</button>
         </div>}
-        {!recoveryCode && !recoveryAcknowledged && <p className="error">Your recovery code has not been acknowledged. Save the code shown during account setup before relying on this account.</p>}
+        {!recoveryCode && !recoveryAcknowledged && <div className="recovery-code-panel">
+          <strong>Recovery code not saved yet</strong>
+          <p>If you closed the setup screen before saving it, generate a replacement now.</p>
+          <button className="primary-btn submit-button" disabled={accountBusy} onClick={() => void rotateUnacknowledgedRecoveryCode()}>Generate replacement recovery code</button>
+        </div>}
         <div className="account-panel">
           <div className="panel-heading"><div><span className="section-kicker">SECURITY</span><h2>Passkeys</h2></div><span className="count">{accountPasskeys.length} REGISTERED</span></div>
           {accountPasskeys.map((key) => <div className="passkey-row" key={key.credential_id}>
