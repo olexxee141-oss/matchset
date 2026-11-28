@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import type { FormEvent } from 'react';
 
 type SetGroup = { id: number; players: string[] };
@@ -53,7 +54,7 @@ function extractCode(value: string, kind: 'set' | 'community') {
 }
 
 export default function App() {
-  const [page, setPage] = useState<'home' | 'create' | 'view' | 'create-community' | 'join-community' | 'community'>('home');
+  const [page, setPage] = useState<'home' | 'create' | 'view' | 'create-community' | 'join-community' | 'community' | 'account' | 'recover'>('home');
   const [session, setSession] = useState<Session | null>(null);
   const [name, setName] = useState('');
   const [playerNames, setPlayerNames] = useState<string[]>(['', '']);
@@ -95,6 +96,18 @@ export default function App() {
   const [clockNow, setClockNow] = useState(Date.now());
   const [goalSelections, setGoalSelections] = useState<Record<string, { teamId: number; scorerId: string; assisterId: string }>>({});
   const [timerSyncing, setTimerSyncing] = useState<Record<string, boolean>>({});
+  const [accountLoaded, setAccountLoaded] = useState(false);
+  const [accountBusy, setAccountBusy] = useState(false);
+  const [accountUserId, setAccountUserId] = useState('');
+  const [accountCsrf, setAccountCsrf] = useState('');
+  const [accountPasskeys, setAccountPasskeys] = useState<Array<{ credential_id: string; device_type: string | null; backed_up: boolean; created_at: string; last_used_at: string | null }>>([]);
+  const [recoveryCode, setRecoveryCode] = useState('');
+  const [recoveryAcknowledged, setRecoveryAcknowledged] = useState(false);
+  const [recoveryEmail, setRecoveryEmail] = useState('');
+  const [recoveryCodeInput, setRecoveryCodeInput] = useState('');
+  const [recoveryLinkToken, setRecoveryLinkToken] = useState('');
+  const [recoveryMessage, setRecoveryMessage] = useState('');
+
 
   const players = useMemo(() => playerNames.map((item) => item.trim()).filter(Boolean), [playerNames]);
   const projectedSets = players.length >= 2 ? Math.ceil(players.length / playersPerSet) : 0;
@@ -193,9 +206,39 @@ export default function App() {
 
   useEffect(() => {
     const parts = window.location.pathname.split('/').filter(Boolean);
+    if (parts[0] === 'recover' && parts[1] === 'verify') {
+      const linkToken = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('token') || '';
+      if (linkToken) {
+        setRecoveryLinkToken(linkToken);
+        window.history.replaceState({}, '', window.location.pathname);
+        setPage('recover');
+        return;
+      }
+    }
     if (parts[0] === 'set' && parts[1]) void loadSession(parts[1]);
     if (parts[0] === 'community' && parts[1]) void loadCommunity(parts[1]);
   }, []);
+
+  useEffect(() => {
+    if (page !== 'account') return;
+    let active = true;
+    setAccountLoaded(false);
+    void api<{ userId: string; csrfToken: string; passkeys: Array<{ credential_id: string; device_type: string | null; backed_up: boolean; created_at: string; last_used_at: string | null }>; recoveryCodeAcknowledged: boolean }>('/api/auth/me')
+      .then((result) => {
+        if (!active) return;
+        setAccountUserId(result.userId);
+        setAccountCsrf(result.csrfToken);
+        setAccountPasskeys(result.passkeys);
+        setRecoveryAcknowledged(result.recoveryCodeAcknowledged);
+      })
+      .catch((e) => {
+        if (!active) return;
+        setAccountUserId('');
+        if (!(e instanceof Error && e.message.includes('Sign in with a passkey'))) setError(e instanceof Error ? e.message : 'Could not load account.');
+      })
+      .finally(() => { if (active) setAccountLoaded(true); });
+    return () => { active = false; };
+  }, [page]);
 
   function startCreate() {
     window.history.pushState({}, '', '/');
@@ -434,6 +477,111 @@ export default function App() {
     finally { setLoading(false); }
   }
 
+  async function refreshAccount() {
+    const result = await api<{ userId: string; csrfToken: string; passkeys: typeof accountPasskeys; recoveryCodeAcknowledged: boolean }>('/api/auth/me');
+    setAccountUserId(result.userId); setAccountCsrf(result.csrfToken);
+    setAccountPasskeys(result.passkeys); setRecoveryAcknowledged(result.recoveryCodeAcknowledged);
+  }
+
+  async function createPasskeyAccount() {
+    setAccountBusy(true); setError(''); setRecoveryMessage('');
+    try {
+      const started = await api<{ options: unknown }>('/api/auth/register/options', { method: 'POST', body: '{}' });
+      const credential = await startRegistration({ optionsJSON: started.options as Parameters<typeof startRegistration>[0]['optionsJSON'] });
+      const completed = await api<{ csrfToken: string; recoveryCode: string }>('/api/auth/register/verify', { method: 'POST', body: JSON.stringify({ response: credential }) });
+      setAccountCsrf(completed.csrfToken); setRecoveryCode(completed.recoveryCode);
+      await refreshAccount(); setNotice('Passkey account created. Save your recovery code before continuing.');
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not create your passkey account.'); }
+    finally { setAccountBusy(false); }
+  }
+
+  async function signInWithPasskey() {
+    setAccountBusy(true); setError('');
+    try {
+      const started = await api<{ options: unknown }>('/api/auth/login/options', { method: 'POST', body: '{}' });
+      const credential = await startAuthentication({ optionsJSON: started.options as Parameters<typeof startAuthentication>[0]['optionsJSON'] });
+      await api('/api/auth/login/verify', { method: 'POST', body: JSON.stringify({ response: credential }) });
+      await refreshAccount(); setNotice('Signed in with your passkey.');
+    } catch (e) { setError(e instanceof Error ? e.message : 'Passkey sign-in failed.'); }
+    finally { setAccountBusy(false); }
+  }
+
+  async function rotateUnacknowledgedRecoveryCode() {
+    if (!accountCsrf) return;
+    setAccountBusy(true); setError('');
+    try {
+      const result = await api<{ recoveryCode: string }>('/api/auth/recovery-code/rotate', {
+        method: 'POST', headers: { 'X-CSRF-Token': accountCsrf }, body: '{}',
+      });
+      setRecoveryCode(result.recoveryCode);
+      setNotice('A replacement recovery code is ready. Save it before continuing.');
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not replace the recovery code.'); }
+    finally { setAccountBusy(false); }
+  }
+
+  async function acknowledgeRecoveryCode() {
+    if (!recoveryCode || !accountCsrf) return;
+    setAccountBusy(true); setError('');
+    try {
+      await api('/api/auth/recovery-code/acknowledge', { method: 'POST', headers: { 'X-CSRF-Token': accountCsrf }, body: JSON.stringify({ recoveryCode }) });
+      setRecoveryCode(''); await refreshAccount(); setNotice('Recovery code acknowledgement saved.');
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not acknowledge the recovery code.'); }
+    finally { setAccountBusy(false); }
+  }
+
+  async function addAccountPasskey() {
+    setAccountBusy(true); setError('');
+    try {
+      const started = await api<{ options: unknown }>('/api/auth/passkeys/register/options', { method: 'POST', headers: { 'X-CSRF-Token': accountCsrf }, body: '{}' });
+      const credential = await startRegistration({ optionsJSON: started.options as Parameters<typeof startRegistration>[0]['optionsJSON'] });
+      await api('/api/auth/passkeys/register/verify', { method: 'POST', headers: { 'X-CSRF-Token': accountCsrf }, body: JSON.stringify({ response: credential }) });
+      await refreshAccount(); setNotice('Additional passkey registered.');
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not add a passkey.'); }
+    finally { setAccountBusy(false); }
+  }
+
+  async function revokeAccountPasskey(credentialId: string) {
+    setAccountBusy(true); setError('');
+    try {
+      await api('/api/auth/passkeys/' + encodeURIComponent(credentialId), { method: 'DELETE', headers: { 'X-CSRF-Token': accountCsrf } });
+      await refreshAccount(); setNotice('Passkey revoked.');
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not revoke passkey.'); }
+    finally { setAccountBusy(false); }
+  }
+
+  async function signOutAccount() {
+    setAccountBusy(true); setError('');
+    try {
+      await api('/api/auth/logout', { method: 'POST', headers: { 'X-CSRF-Token': accountCsrf }, body: '{}' });
+      setAccountUserId(''); setAccountCsrf(''); setAccountPasskeys([]); setRecoveryAcknowledged(false);
+      setNotice('Signed out.');
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not sign out.'); }
+    finally { setAccountBusy(false); }
+  }
+
+  async function requestAccountRecovery(event: FormEvent) {
+    event.preventDefault(); setAccountBusy(true); setError(''); setRecoveryMessage('');
+    try {
+      const result = await api<{ message: string }>('/api/auth/recovery/start', { method: 'POST', body: JSON.stringify({ recoveryCode: recoveryCodeInput, email: recoveryEmail }) });
+      setRecoveryMessage(result.message);
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not start account recovery.'); }
+    finally { setAccountBusy(false); }
+  }
+
+  async function completeAccountRecovery() {
+    if (!recoveryLinkToken) return;
+    setAccountBusy(true); setError('');
+    try {
+      const started = await api<{ options: unknown }>('/api/auth/recovery/verify-email', { method: 'POST', body: JSON.stringify({ token: recoveryLinkToken }) });
+      const credential = await startRegistration({ optionsJSON: started.options as Parameters<typeof startRegistration>[0]['optionsJSON'] });
+      const completed = await api<{ csrfToken: string; recoveryCode: string }>('/api/auth/recovery/verify-passkey', { method: 'POST', body: JSON.stringify({ response: credential }) });
+      window.history.replaceState({}, '', '/'); setRecoveryLinkToken(''); setPage('account');
+      setAccountCsrf(completed.csrfToken); setRecoveryCode(completed.recoveryCode);
+      await refreshAccount(); setNotice('Account recovered. Save your replacement recovery code.');
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not complete account recovery.'); }
+    finally { setAccountBusy(false); }
+  }
+
   async function copyText(value: string, success: string) {
     try { await navigator.clipboard.writeText(value); setNotice(success); }
     catch { setNotice(value); }
@@ -444,7 +592,7 @@ export default function App() {
   }
 
   return <main className="shell">
-    <header className="topbar"><button className="brand" onClick={openHome} aria-label="MatchSet home"><span className="brand-mark">M</span> matchset</button><span className="top-note">PLAYER ARRANGEMENTS, MADE SIMPLE</span></header>
+    <header className="topbar"><button className="brand" onClick={openHome} aria-label="MatchSet home"><span className="brand-mark">M</span> matchset</button><span className="top-note">PLAYER ARRANGEMENTS, MADE SIMPLE</span><button className="account-top-button" onClick={() => { setError(''); setPage('account'); }}>Account</button></header>
 
     {page === 'home' && <section className="hero">
       <div className="eyebrow"><span className="pulse" /> LESS TIME ORGANISING. MORE TIME PLAYING.</div>
@@ -462,6 +610,60 @@ export default function App() {
       </div>
       {showViewInput && <form className="lookup-form" onSubmit={(event) => { event.preventDefault(); void loadSession(viewLink); }}><label htmlFor="view-link">PASTE THE SHARED LINK OR SET CODE</label><div><input id="view-link" value={viewLink} onChange={(event) => setViewLink(event.target.value)} placeholder="https://…/set/abc123" autoFocus /><button className="primary-btn lookup-button" disabled={loading}>Open set ↗</button></div></form>}
       <div className="hero-foot"><span>NO ACCOUNT NEEDED</span><span>·</span><span>COMMUNITY HISTORY</span><span>·</span><span>SHARE INSTANTLY</span></div>
+      {error && <p className="error">{error}</p>}
+    </section>}
+
+    {page === 'account' && <section className="workspace account-workspace">
+      <button className="back" onClick={openHome}>← Back</button>
+      <div className="section-kicker">MATCHSET IDENTITY</div><h1 className="page-title">Your <em>account.</em></h1>
+      <p className="subcopy">Use a passkey to access your MatchSet identity across communities. No account email or password is stored.</p>
+      {!accountLoaded ? <p className="hint">Checking account session…</p> : accountUserId ? <>
+        <div className="account-status"><strong>Signed in</strong><small>Account ID: {accountUserId}</small></div>
+        {recoveryCode && <div className="recovery-code-panel">
+          <strong>Save your recovery code now</strong>
+          <p>This code is shown once. It is required together with an email address if you lose every passkey.</p>
+          <code>{recoveryCode}</code>
+          <button className="secondary-btn" onClick={() => void copyText(recoveryCode, 'Recovery code copied. Store it somewhere private.')}>Copy recovery code</button>
+          <button className="primary-btn submit-button" disabled={accountBusy} onClick={() => void acknowledgeRecoveryCode()}>I saved my recovery code</button>
+        </div>}
+        {!recoveryCode && !recoveryAcknowledged && <div className="recovery-code-panel">
+          <strong>Recovery code not saved yet</strong>
+          <p>If you closed the setup screen before saving it, generate a replacement now.</p>
+          <button className="primary-btn submit-button" disabled={accountBusy} onClick={() => void rotateUnacknowledgedRecoveryCode()}>Generate replacement recovery code</button>
+        </div>}
+        <div className="account-panel">
+          <div className="panel-heading"><div><span className="section-kicker">SECURITY</span><h2>Passkeys</h2></div><span className="count">{accountPasskeys.length} REGISTERED</span></div>
+          {accountPasskeys.map((key) => <div className="passkey-row" key={key.credential_id}>
+            <span><strong>{key.device_type || 'Passkey'}</strong><small>{key.backed_up ? 'Synced / backed up' : 'Device-bound or backup status unavailable'}</small></span>
+            <button className="text-button" disabled={accountBusy || accountPasskeys.length <= 1} onClick={() => void revokeAccountPasskey(key.credential_id)}>Revoke</button>
+          </div>)}
+          <button className="secondary-btn" disabled={accountBusy} onClick={() => void addAccountPasskey()}>＋ Add another passkey</button>
+          <p className="hint">Keep at least two passkeys on separate devices where possible. You cannot revoke your last active passkey.</p>
+        </div>
+        <button className="secondary-btn" disabled={accountBusy} onClick={() => void signOutAccount()}>Sign out</button>
+      </> : <>
+        <div className="account-panel">
+          <h2>Passkey access</h2>
+          <p className="hint">Create a new identity or sign in using a passkey already registered with MatchSet.</p>
+          <button className="primary-btn submit-button" disabled={accountBusy} onClick={() => void createPasskeyAccount()}>{accountBusy ? 'Please wait…' : 'Create account with passkey'} <span>↗</span></button>
+          <button className="secondary-btn" disabled={accountBusy} onClick={() => void signInWithPasskey()}>Sign in with passkey</button>
+        </div>
+        <form className="form-card" onSubmit={requestAccountRecovery}>
+          <h2>Recover an account</h2>
+          <p className="hint">You need your one-time recovery code and access to an email address you can receive a verification link at. The address is not saved to your MatchSet account.</p>
+          <label className="field-label">RECOVERY CODE<input value={recoveryCodeInput} onChange={(e) => setRecoveryCodeInput(e.target.value)} autoComplete="off" required /></label>
+          <label className="field-label">CURRENT EMAIL ADDRESS<input type="email" value={recoveryEmail} onChange={(e) => setRecoveryEmail(e.target.value)} autoComplete="email" required /></label>
+          <button className="primary-btn submit-button" disabled={accountBusy}>Send recovery link <span>↗</span></button>
+          {recoveryMessage && <p className="success-note">{recoveryMessage}</p>}
+        </form>
+      </>}
+      {error && <p className="error">{error}</p>}
+    </section>}
+
+    {page === 'recover' && <section className="workspace account-workspace">
+      <div className="section-kicker">ACCOUNT RECOVERY</div><h1 className="page-title">Restore your <em>access.</em></h1>
+      <p className="subcopy">Your email link is valid for a short time. Continue to register a new passkey, then save the replacement recovery code.</p>
+      <button className="primary-btn submit-button" disabled={accountBusy || !recoveryLinkToken} onClick={() => void completeAccountRecovery()}>{accountBusy ? 'Verifying…' : 'Verify and register new passkey'} <span>↗</span></button>
       {error && <p className="error">{error}</p>}
     </section>}
 
