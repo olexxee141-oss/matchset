@@ -17,11 +17,12 @@ type LeaderboardEntry = { memberId: string; name: string; wins: number; losses: 
 type Community = { slug: string; name: string; createdAt: string };
 type CommunityPayload = { community: Community; members: Member[]; matches: CommunityMatch[]; leaderboard: LeaderboardEntry[]; tournaments: Tournament[]; access: { role: 'OWNER' | 'ADMIN' | 'VIEWER' } };
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
+const API_BASE_URL = (import.meta.env.DEV ? (import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000') : '').replace(/\/+$/, '');
 
 const api = async <T,>(url: string, options?: RequestInit): Promise<T> => {
   const response = await fetch(`${API_BASE_URL}${url}`, {
     ...options,
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
   });
   const body = await response.text();
@@ -30,7 +31,7 @@ const api = async <T,>(url: string, options?: RequestInit): Promise<T> => {
     data = body ? JSON.parse(body) : {};
   } catch {
     const preview = body.replace(/\s+/g, ' ').slice(0, 180);
-    const configurationHint = API_BASE_URL ? '' : ' Set VITE_API_BASE_URL in Vercel to https://matchset-backend.onrender.com.';
+    const configurationHint = API_BASE_URL ? '' : ' Check that the Vercel /api rewrite points to the Render backend.';
     throw new Error(`API returned non-JSON (HTTP ${response.status}).${configurationHint} Response: ${preview || '(empty response)'}`);
   }
   if (!response.ok) {
