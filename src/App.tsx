@@ -623,22 +623,55 @@ export default function App() {
   return <main className="shell">
     <header className="topbar"><button className="brand" onClick={openHome} aria-label="MatchSet home"><span className="brand-mark">M</span> matchset</button><span className="top-note">PLAYER ARRANGEMENTS, MADE SIMPLE</span><ActionButton variant="secondary" className="account-top-button" onClick={() => { setError(''); setPage('account'); }}>Account</ActionButton></header>
 
-    {page === 'home' && <section className="hero">
-      <div className="eyebrow"><span className="pulse" /> LESS TIME ORGANISING. MORE TIME PLAYING.</div>
-      <h1>Make the lineup.<br /><em>Get into the game.</em></h1>
-      <p className="intro">Put players into balanced teams, keep a record of every match, and see who wins most in your community.</p>
-      {recentCommunities.length > 0 && <section className="recent-communities">
-        <div className="panel-heading"><div><span className="section-kicker">SAVED ON THIS DEVICE</span><h2>My communities</h2></div><span className="count">{recentCommunities.length} SAVED</span></div>
-        <div className="recent-community-list">{recentCommunities.map((item) => <button className="recent-community-card" key={item.slug} onClick={() => void loadCommunity(item.slug, true)} disabled={loading}><span className="recent-community-mark">{item.name.slice(0, 1).toUpperCase()}</span><span><strong>{item.name}</strong><small>Open community</small></span><span className="arrow">↗</span></button>)}</div>
-      </section>}
-      <div className="choices">
-        <button className="choice create-choice" onClick={() => { setError(''); setPage('create-community'); }}><span className="choice-icon">＋</span><span><strong>Create a community</strong><small>Start a group and keep its match history.</small></span><span className="arrow">↗</span></button>
-        <button className="choice view-choice" onClick={() => { setError(''); setPage('join-community'); }}><span className="choice-icon">⌕</span><span><strong>View a community</strong><small>Open an invite link or community code.</small></span><span className="arrow">↗</span></button>
-        <button className="choice view-choice" onClick={startCreate}><span className="choice-icon">▦</span><span><strong>Quick arrangement</strong><small>Create a standalone shareable set.</small></span><span className="arrow">↗</span></button>
-        <button className="choice view-choice" onClick={() => { setShowViewInput((value) => !value); setError(''); }}><span className="choice-icon">↗</span><span><strong>View a set</strong><small>Open a standalone arrangement link.</small></span><span className="arrow">↗</span></button>
-      </div>
-      {showViewInput && <form className="lookup-form" onSubmit={(event) => { event.preventDefault(); void loadSession(viewLink); }}><label htmlFor="view-link">PASTE THE SHARED LINK OR SET CODE</label><div><input id="view-link" value={viewLink} onChange={(event) => setViewLink(event.target.value)} placeholder="https://…/set/abc123" autoFocus /><button className="primary-btn lookup-button" disabled={loading}>Open set ↗</button></div></form>}
-      <div className="hero-foot"><span>NO ACCOUNT NEEDED</span><span>·</span><span>COMMUNITY HISTORY</span><span>·</span><span>SHARE INSTANTLY</span></div>
+    {page === 'home' && <section className="home-dashboard workspace">
+      <header className="home-intro">
+        <div className="eyebrow"><span className="pulse" /> MATCHDAY WORKSPACE</div>
+        <h1>Make matchday <em>count.</em></h1>
+        <p className="intro">Bring your players together, organise teams, run matches and keep the results.</p>
+        <div className="home-primary-actions">
+          <button className="home-action home-action-primary" onClick={() => { setError(''); setPage('create-community'); }}>
+            <span className="home-action-icon">＋</span><span><strong>Create a community</strong><small>Start a group and manage its match history.</small></span><span className="home-action-arrow">↗</span>
+          </button>
+          <button className="home-action" onClick={() => { setError(''); setPage('join-community'); }}>
+            <span className="home-action-icon">⌕</span><span><strong>Open a community</strong><small>Use an invite link or community code.</small></span><span className="home-action-arrow">↗</span>
+          </button>
+        </div>
+      </header>
+
+      <section className="home-section home-communities">
+        <div className="home-section-heading">
+          <div><span className="section-kicker">YOUR MATCHDAY SPACES</span><h2>My communities</h2></div>
+          <span className="home-section-meta">{recentCommunities.length} RECENT</span>
+        </div>
+        {recentCommunities.length > 0 ? <div className="home-community-grid">
+          {recentCommunities.map((item) => <button className="home-community-card" key={item.slug} onClick={() => void loadCommunity(item.slug, true)} disabled={loading}>
+            <span className="home-community-mark">{item.name.slice(0, 1).toUpperCase()}</span>
+            <span className="home-community-copy"><strong>{item.name}</strong><small>Open community workspace</small></span>
+            <span className="home-action-arrow">↗</span>
+          </button>)}
+        </div> : <div className="home-empty-state">
+          <span className="home-empty-icon">◎</span>
+          <div><strong>No communities opened yet</strong><p>Open a community invite or create one to keep its players and match history together.</p></div>
+          <button className="secondary-btn" onClick={() => setPage('join-community')}>Open invite link</button>
+        </div>}
+      </section>
+
+      <section className="home-section home-tools">
+        <div className="home-section-heading"><div><span className="section-kicker">STANDALONE TOOLS</span><h2>Quick actions</h2></div></div>
+        <div className="home-tool-grid">
+          <button className="home-tool-card" onClick={startCreate}>
+            <span className="home-tool-icon">▦</span><span><strong>Quick arrangement</strong><small>Balance players into shareable sets.</small></span><span className="home-action-arrow">↗</span>
+          </button>
+          <button className="home-tool-card" onClick={() => { setShowViewInput((value) => !value); setError(''); }}>
+            <span className="home-tool-icon">↗</span><span><strong>Open a saved set</strong><small>Return to a standalone arrangement.</small></span><span className="home-action-arrow">↗</span>
+          </button>
+        </div>
+        {showViewInput && <form className="lookup-form" onSubmit={(event) => { event.preventDefault(); void loadSession(viewLink); }}>
+          <label htmlFor="view-link">SHARED LINK OR SET CODE</label>
+          <div><input id="view-link" value={viewLink} onChange={(event) => setViewLink(event.target.value)} placeholder="Paste a MatchSet link or code" autoFocus /><button className="primary-btn lookup-button" disabled={loading}>Open set ↗</button></div>
+        </form>}
+      </section>
+      {loading && <StatusMessage tone="info">Opening your MatchSet workspace…</StatusMessage>}
       {error && <StatusMessage tone="error">{error}</StatusMessage>}
     </section>}
 
