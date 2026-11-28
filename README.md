@@ -128,3 +128,8 @@ MatchSet is intended to support previously opened communities and match-session 
 - [Backend sync protocol, idempotency and conflict handling](https://github.com/olexxee141-oss/Matchset-backend/blob/main/docs/offline-support.md)
 
 Offline results will remain provisional until the backend acknowledges them. The first release is limited to one controlling organiser device per match session; multi-device offline editing is out of scope.
+
+
+## Passkey account access
+
+The frontend includes account setup, passkey sign-in, additional passkey management, recovery-code acknowledgement, and recovery-link completion screens. These screens require backend authentication routes and database migrations 003 and 004. Do not enable the flow in production until both migrations have been reviewed and applied with a backup and rollback plan. Existing community owner/admin token access remains separate during the staged migration.
