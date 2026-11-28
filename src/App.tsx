@@ -157,10 +157,12 @@ export default function App() {
       const url = new URL(window.location.href);
       // Capability secrets belong in the URL fragment, never the query string.
       const fragmentParams = new URLSearchParams(url.hash.replace(/^#/, ''));
-      const invitedAdminToken = fragmentParams.get('adminToken');
+      // Accept older query-string invitations once, then immediately scrub the secret.
+      const invitedAdminToken = fragmentParams.get('adminToken') || url.searchParams.get('adminToken');
       if (invitedAdminToken) {
         localStorage.setItem(`matchset-admin:${slug}`, invitedAdminToken);
         fragmentParams.delete('adminToken');
+        url.searchParams.delete('adminToken');
         url.hash = fragmentParams.toString();
         window.history.replaceState({}, '', url.pathname + url.search + url.hash);
       }
