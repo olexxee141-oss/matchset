@@ -10,7 +10,8 @@ A lightweight PWA for arranging players into balanced teams, sharing links, and 
 - The creator maintains the persistent, community-specific player roster; invitees cannot add or edit players.
 - Create matches from roster members; teams are balanced automatically.
 - Start each community match with Set 1 vs Set 2, then rotate using winner-stays rules: winner stays, loser joins the back of the queue; after a draw both teams join the back and the next two teams enter.
-- Record every game (wins and draws), view the waiting queue and game history, and undo the latest result.
+- Configure a goal target and fixed time per rotation game. Record goals with scorer and optional assist; games finish automatically at the goal target or when time expires (higher score wins, tied score is a draw).
+- Pause/resume the countdown, view the score and goal history, and undo the latest completed game.
 - View the latest 100 matches and an all-time leaderboard with wins, losses, matches played, and win rate.
 - Every player on the winning team receives one win. A match result can only be recorded once.
 
