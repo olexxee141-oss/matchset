@@ -14,6 +14,7 @@ type TournamentTeam = { id: string; name: string; members: Array<{ id: string; n
 type TournamentGroup = { id: string; name: string; teams: TournamentTeam[] };
 type Tournament = { id: string; name: string; createdAt: string; groups: TournamentGroup[] };
 type DraftTournamentTeam = { name: string; memberIds: string[] };
+type DraftTournamentGroup = { name: string; teams: DraftTournamentTeam[] };
 type Team = { id: number; players: Array<{ id: string; name: string; memberCode?: string }> };
 type RotationGoal = { teamId: number; scorerId: string; scorerName: string; assisterId: string | null; assisterName: string | null; scoredAt: string };
 type RotationGame = { number: number; teamAId: number; teamBId: number; outcome: 'TEAM_A_WIN' | 'TEAM_B_WIN' | 'DRAW'; winnerTeamId: number | null; playedAt: string; goals?: RotationGoal[]; score?: [number, number] };
@@ -57,7 +58,6 @@ export default function App() {
     { name: 'Group A', teams: [{ name: 'Team 1', memberIds: [] }] },
     { name: 'Group B', teams: [{ name: 'Team 1', memberIds: [] }] },
   ]);
-  const [quickTournamentOpen, setQuickTournamentOpen] = useState(false);
   const [communityName, setCommunityName] = useState('');
   const [creatorName, setCreatorName] = useState('');
   const [joinCode, setJoinCode] = useState('');
@@ -826,28 +826,37 @@ export default function App() {
         {canManageTournaments && <form className="community-form tournament-form" onSubmit={createTournament}>
           <div className="tournament-form-intro"><div><span className="section-kicker">NEW COMPETITION</span><h3>Create tournament</h3></div><span className="count">{draftTournamentGroups.length} GROUPS</span></div>
           <label className="field-label">TOURNAMENT NAME<input value={tournamentName} onChange={(event) => setTournamentName(event.target.value)} placeholder="e.g. MatchSet Cup" maxLength={80} required /></label>
-          <label className="field-label">NUMBER OF GROUPS<select value={tournamentGroupCount} onChange={(event) => setTournamentGroupCount(Number(event.target.value))}>{[2, 3, 4, 5, 6, 8].map((count) => <option key={count} value={count}>{count} groups</option>)}</select></label>
-          <div className="tournament-draft-teams">{tournamentTeams.map((team, index) => {
-            const assignedElsewhere = new Set(tournamentTeams.flatMap((otherTeam, teamIndex) => teamIndex === index ? [] : otherTeam.memberIds));
-            return <div className="tournament-draft-team" key={index}>
-              <div className="tournament-team-heading"><span className="team-number">TEAM {index + 1}</span><span className="team-player-count">{team.memberIds.length} selected</span></div>
-              <label className="field-label tournament-team-name">TEAM NAME<input value={team.name} onChange={(event) => updateDraftTeam(index, { name: event.target.value })} placeholder={`Team ${index + 1}`} maxLength={40} /></label>
-              <fieldset className="tournament-player-picker">
-                <legend>Choose players</legend>
-                {members.length === 0 ? <p className="hint">Add players to the community roster first.</p> : <div className="tournament-player-options">{members.map((member) => {
-                  const selected = team.memberIds.includes(member.id);
-                  const used = assignedElsewhere.has(member.id);
-                  return <label className={`tournament-player-option${selected ? ' selected' : ''}${used ? ' unavailable' : ''}`} key={member.id}>
-                    <input type="checkbox" checked={selected} disabled={used} onChange={() => updateDraftTeam(index, { memberIds: selected ? team.memberIds.filter((id) => id !== member.id) : [...team.memberIds, member.id] })} />
-                    <span>{member.name}</span>
-                    {used && <small>Assigned</small>}
-                  </label>;
-                })}</div>}
-              </fieldset>
-              {tournamentTeams.length > 2 && <button type="button" className="text-button remove-tournament-team" onClick={() => setTournamentTeams((current) => current.filter((_, teamIndex) => teamIndex !== index))}>Remove team</button>}
-            </div>;
+          <label className="field-label">NUMBER OF GROUPS<select value={draftTournamentGroups.length} onChange={(event) => resizeDraftGroups(Number(event.target.value))}>{[2, 3, 4, 5, 6, 8].map((count) => <option key={count} value={count}>{count} groups</option>)}</select></label>
+          <div className="tournament-draft-groups">{draftTournamentGroups.map((group, groupIndex) => {
+            const assignedElsewhere = new Set(draftTournamentGroups.flatMap((otherGroup, otherGroupIndex) => otherGroupIndex === groupIndex ? [] : otherGroup.teams.flatMap((team) => team.memberIds)));
+            return <section className="tournament-draft-group" key={groupIndex}>
+              <div className="tournament-group-heading">
+                <label className="field-label">GROUP NAME<input value={group.name} onChange={(event) => setDraftTournamentGroups((current) => current.map((item, index) => index === groupIndex ? { ...item, name: event.target.value } : item))} maxLength={40} /></label>
+                <span className="count">{group.teams.length} TEAMS</span>
+              </div>
+              {group.teams.map((team, teamIndex) => {
+                const usedByOtherTeams = new Set(draftTournamentGroups.flatMap((otherGroup, otherGroupIndex) => otherGroup.teams.flatMap((otherTeam, otherTeamIndex) => otherGroupIndex === groupIndex && otherTeamIndex === teamIndex ? [] : otherTeam.memberIds)));
+                return <div className="tournament-draft-team" key={teamIndex}>
+                  <div className="tournament-team-heading"><span className="team-number">TEAM {teamIndex + 1}</span><span className="team-player-count">{team.memberIds.length} selected</span></div>
+                  <label className="field-label tournament-team-name">TEAM NAME<input value={team.name} onChange={(event) => updateDraftTeam(groupIndex, teamIndex, { name: event.target.value })} placeholder={`Team ${teamIndex + 1}`} maxLength={40} /></label>
+                  <fieldset className="tournament-player-picker">
+                    <legend>Choose players</legend>
+                    {members.length === 0 ? <p className="hint">Add players to the community roster first.</p> : <div className="tournament-player-options">{members.map((member) => {
+                      const selected = team.memberIds.includes(member.id);
+                      const used = usedByOtherTeams.has(member.id);
+                      return <label className={`tournament-player-option${selected ? ' selected' : ''}${used ? ' unavailable' : ''}`} key={member.id}>
+                        <input type="checkbox" checked={selected} disabled={used} onChange={() => updateDraftTeam(groupIndex, teamIndex, { memberIds: selected ? team.memberIds.filter((id) => id !== member.id) : [...team.memberIds, member.id] })} />
+                        <span>{memberLabel(member)}</span>
+                        {used && <small>Assigned</small>}
+                      </label>;
+                    })}</div>}
+                  </fieldset>
+                  {group.teams.length > 1 && <button type="button" className="text-button remove-tournament-team" onClick={() => setDraftTournamentGroups((current) => current.map((item, index) => index === groupIndex ? { ...item, teams: item.teams.filter((_, indexToRemove) => indexToRemove !== teamIndex) } : item))}>Remove team</button>}
+                </div>;
+              })}
+              <button type="button" className="text-button" onClick={() => setDraftTournamentGroups((current) => current.map((item, index) => index === groupIndex ? { ...item, teams: [...item.teams, { name: `Team ${item.teams.length + 1}`, memberIds: [] }] } : item))}>＋ Add team to {group.name}</button>
+            </section>;
           })}</div>
-          <button type="button" className="text-button" onClick={() => setTournamentTeams((current) => [...current, { name: `Team ${current.length + 1}`, memberIds: [] }])}>＋ Add team</button>
           <p className="hint">Select at least two players per team. Teams are distributed across groups automatically; you can move teams between groups after creation.</p>
           <button className="primary-btn submit-button" disabled={loading}>{loading ? 'Saving…' : 'Create tournament groups'} <span>↗</span></button>
         </form>}
