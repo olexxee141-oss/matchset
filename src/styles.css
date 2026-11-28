@@ -63,33 +63,18 @@
 .rotation-current{margin-top:12px;padding:12px;border:1px solid #e8ece4;border-radius:9px;background:#fff}.rotation-label,.rotation-queue>strong,.rotation-last-game>span{display:block;font:600 9px 'DM Mono',monospace;letter-spacing:.8px;color:#73806e;margin-bottom:9px}.active-team{border-color:#b9d59f;background:#f6faef}.rotation-controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:11px}.rotation-controls .record-win-btn{margin:0;flex:1;min-width:90px}.rotation-controls .draw-btn{background:#f7f5ed;border-color:#e7dfc7;color:#876e39}.rotation-queue{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;padding:11px 2px;border-bottom:1px solid #edf0e9}.rotation-queue strong{margin:0}.rotation-queue span{font-size:11px;color:#667263}.rotation-last-game{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 2px}.rotation-last-game>span{margin:0}.rotation-last-game strong{font-size:11px;color:#465342}.rotation-last-game .text-button{margin-left:auto}.rotation-history{padding-top:8px;font-size:11px;color:#586453}.rotation-history summary{cursor:pointer;font-weight:600}.rotation-history ol{padding-left:20px;line-height:1.9}.rotation-history .hint{margin-top:8px}
 
 
-/* Tournament registration and shared tool surfaces */
-.quick-tournament-picker{margin:18px 0 4px;padding:20px;border:1px solid #dfe5da;border-radius:16px;background:#fff}
-.quick-tournament-picker .panel-heading{margin-bottom:8px}
-.tournament-form{display:grid;gap:16px}
-.tournament-form-intro,.tournament-draft-group-head,.tournament-team-fields{display:flex;align-items:center;justify-content:space-between;gap:12px}
-.tournament-form-intro h3,.tournament-draft-group-head h4{margin:4px 0 0}
-.group-count-field{max-width:220px}
-.tournament-draft-groups{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:start}
-.tournament-draft-group{min-width:0;padding:15px;border:1px solid #e2e7de;border-radius:14px;background:#fafbf8}
-.tournament-draft-group-head{padding-bottom:12px;border-bottom:1px solid #e6eae2}
-.tournament-draft-group-head h4{font-size:17px}
-.tournament-draft-team{margin-top:12px;padding:13px;border:1px solid #e5e9e1;border-radius:11px;background:#fff}
-.tournament-team-fields{align-items:end}
-.tournament-team-fields .field-label{flex:1}
-.tournament-player-picker{margin-top:12px}
-.tournament-player-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:8px}
-.tournament-player-option{display:flex;align-items:center;gap:7px;min-width:0;padding:8px;border:1px solid #e6eae3;border-radius:8px;background:#fff;font-size:11px;color:#465342}
-.tournament-player-option.selected{border-color:#a8c48c;background:#f3f8ed}
-.tournament-player-option input{accent-color:#648d3c}
-.tournament-player-option span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.tournament-player-option small{margin-left:auto;font:600 8px 'DM Mono',monospace;color:#9a8060}
-.remove-draft-team{margin-top:10px}
-.add-draft-team{width:100%;margin-top:10px;padding:11px;border:1px dashed #b9c9ab;border-radius:9px;background:transparent;color:#557b38;font:700 11px Manrope;cursor:pointer}
-.add-draft-team:hover{background:#f2f7ed}
-.tournament-review{display:grid;gap:5px;padding:14px;border-radius:10px;background:#f1f5ec;color:#3e5035}
-.tournament-review strong{font-size:12px}
-.tournament-review span{font-size:11px}
-.tournament-review small{font-size:10px;line-height:1.5;color:#687462}
-@media(max-width:760px){.tournament-draft-groups{grid-template-columns:1fr}.tournament-player-options{grid-template-columns:repeat(2,minmax(0,1fr))}.quick-tournament-picker{padding:15px}}
-@media(max-width:420px){.tournament-player-options{grid-template-columns:1fr}.tournament-team-fields{align-items:flex-start;flex-direction:column}}
+.account-top-button { border: 1px solid var(--line, #d9dfe8); background: transparent; color: inherit; border-radius: 999px; padding: 9px 15px; font: inherit; font-size: 13px; cursor: pointer; }
+.account-workspace { max-width: 680px; }
+.account-panel, .account-status, .recovery-code-panel { border: 1px solid var(--line, #d9dfe8); border-radius: 18px; padding: 18px; margin: 18px 0; background: var(--panel, #fff); }
+.account-panel h2, .recovery-code-panel strong { margin: 0 0 8px; }
+.account-status { display: grid; gap: 5px; }
+.account-status small, .passkey-row small { color: var(--muted, #697386); }
+.passkey-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 0; border-top: 1px solid var(--line, #d9dfe8); }
+.passkey-row span { display: grid; gap: 4px; min-width: 0; }
+.passkey-row small { overflow-wrap: anywhere; }
+.recovery-code-panel { display: grid; gap: 12px; border-color: #d7a94c; }
+.recovery-code-panel code { display: block; overflow-wrap: anywhere; padding: 12px; border-radius: 10px; background: #f4f0e8; color: #29251e; font-size: 14px; }
+.text-button { border: 0; background: transparent; color: #a43a32; font: inherit; cursor: pointer; }
+.text-button:disabled { opacity: .4; cursor: not-allowed; }
+.success-note { color: #176b45; font-size: 14px; }
+@media (max-width: 560px) { .account-top-button { padding: 8px 11px; } .recovery-code-panel, .account-panel, .account-status { padding: 14px; } }

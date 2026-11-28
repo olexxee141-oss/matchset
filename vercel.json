@@ -3,6 +3,10 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
+      "source": "/api/:path*",
+      "destination": "https://matchset-backend.onrender.com/api/:path*"
+    },
+    {
       "source": "/set/:slug",
       "destination": "/index.html"
     },

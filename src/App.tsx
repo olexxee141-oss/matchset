@@ -1,59 +1,35 @@
 import { useEffect, useMemo, useState } from 'react';
+import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import type { FormEvent } from 'react';
+import { resolveAppRoute, type AppPage } from './navigation';
+import { api } from './lib/api';
+import { extractCode } from './lib/codes';
+import { ActionButton, SectionTabs, StatusMessage } from './components/ui';
+import { LiveMatchCard } from './components/LiveMatchCard';
 
 type SetGroup = { id: number; players: string[] };
 type Session = { id: string; name: string; players: string[]; playersPerSet: number; sets: SetGroup[]; createdAt: string; updatedAt: string };
-type Member = { id: string; name: string; joined_at?: string; role?: 'MEMBER' | 'ADMIN' };
-type TournamentTeam = { id: string; name: string; members: Array<{ id: string; name: string }> };
+type Member = { id: string; name: string; memberCode: string; joined_at?: string; role?: 'MEMBER' | 'ADMIN' };
+type TournamentTeam = { id: string; name: string; members: Array<{ id: string; name: string; memberCode?: string }> };
 type TournamentGroup = { id: string; name: string; teams: TournamentTeam[] };
 type Tournament = { id: string; name: string; createdAt: string; groups: TournamentGroup[] };
 type DraftTournamentTeam = { name: string; memberIds: string[] };
-type DraftTournamentGroup = { name: string; teams: DraftTournamentTeam[] };
-type Team = { id: number; players: Array<{ id: string; name: string }> };
+type Team = { id: number; players: Array<{ id: string; name: string; memberCode?: string }> };
 type RotationGoal = { teamId: number; scorerId: string; scorerName: string; assisterId: string | null; assisterName: string | null; scoredAt: string };
 type RotationGame = { number: number; teamAId: number; teamBId: number; outcome: 'TEAM_A_WIN' | 'TEAM_B_WIN' | 'DRAW'; winnerTeamId: number | null; playedAt: string; goals?: RotationGoal[]; score?: [number, number] };
 type RotationState = { status: 'ACTIVE' | 'ENDED'; activeTeamIds: number[]; waitingTeamIds: number[]; games: RotationGame[]; goalsToWin?: number; durationSeconds?: number; score?: [number, number]; goals?: RotationGoal[]; timerStartedAt?: string; timerPausedAt?: string | null; pausedRemainingMs?: number | null };
 type CommunityMatch = { id: string; title: string; teams: Team[]; winningTeamId: number | null; rotationState?: RotationState | null; createdAt: string; completedAt: string | null };
-type LeaderboardEntry = { memberId: string; name: string; wins: number; losses: number; draws?: number; matchesPlayed: number; winRate: number };
+type LeaderboardEntry = { memberId: string; name: string; memberCode?: string; wins: number; losses: number; draws?: number; matchesPlayed: number; winRate: number };
 type Community = { slug: string; name: string; createdAt: string };
 type CommunityPayload = { community: Community; members: Member[]; matches: CommunityMatch[]; leaderboard: LeaderboardEntry[]; tournaments: Tournament[]; access: { role: 'OWNER' | 'ADMIN' | 'VIEWER' } };
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
-
-const api = async <T,>(url: string, options?: RequestInit): Promise<T> => {
-  const response = await fetch(`${API_BASE_URL}${url}`, {
-    ...options,
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-  });
-  const body = await response.text();
-  let data: unknown;
-  try {
-    data = body ? JSON.parse(body) : {};
-  } catch {
-    const preview = body.replace(/\s+/g, ' ').slice(0, 180);
-    const configurationHint = API_BASE_URL ? '' : ' Set VITE_API_BASE_URL in Vercel to https://matchset-backend.onrender.com.';
-    throw new Error(`API returned non-JSON (HTTP ${response.status}).${configurationHint} Response: ${preview || '(empty response)'}`);
-  }
-  if (!response.ok) {
-    const message = typeof data === 'object' && data !== null && 'error' in data && typeof data.error === 'string'
-      ? data.error
-      : `Request failed (HTTP ${response.status}).`;
-    throw new Error(message);
-  }
-  return data as T;
-};
-
-function extractCode(value: string, kind: 'set' | 'community') {
-  let slug = value.trim();
-  try {
-    if (slug.includes('://')) slug = new URL(slug).pathname.split('/').filter(Boolean).at(-1) || '';
-  } catch { return ''; }
-  slug = slug.replace(new RegExp('^' + kind + '/'), '').trim();
-  return /^[a-zA-Z0-9_-]{6,40}$/.test(slug) ? slug : '';
+function memberLabel(member: { name: string; memberCode?: string }) {
+  return member.memberCode ? `${member.name} · ${member.memberCode}` : member.name;
 }
 
+
 export default function App() {
-  const [page, setPage] = useState<'home' | 'create' | 'view' | 'create-community' | 'join-community' | 'community'>('home');
+  const [page, setPageState] = useState<AppPage>(() => resolveAppRoute(window.location.pathname).page);
   const [session, setSession] = useState<Session | null>(null);
   const [name, setName] = useState('');
   const [playerNames, setPlayerNames] = useState<string[]>(['', '']);
@@ -98,12 +74,37 @@ export default function App() {
   const [clockNow, setClockNow] = useState(Date.now());
   const [goalSelections, setGoalSelections] = useState<Record<string, { teamId: number; scorerId: string; assisterId: string }>>({});
   const [timerSyncing, setTimerSyncing] = useState<Record<string, boolean>>({});
+  const [accountLoaded, setAccountLoaded] = useState(false);
+  const [accountBusy, setAccountBusy] = useState(false);
+  const [accountUserId, setAccountUserId] = useState('');
+  const [accountCsrf, setAccountCsrf] = useState('');
+  const [accountPasskeys, setAccountPasskeys] = useState<Array<{ credential_id: string; device_type: string | null; backed_up: boolean; created_at: string; last_used_at: string | null }>>([]);
+  const [recoveryCode, setRecoveryCode] = useState('');
+  const [recoveryAcknowledged, setRecoveryAcknowledged] = useState(false);
+  const [recoveryEmail, setRecoveryEmail] = useState('');
+  const [recoveryCodeInput, setRecoveryCodeInput] = useState('');
+  const [recoveryLinkToken, setRecoveryLinkToken] = useState('');
+  const [recoveryMessage, setRecoveryMessage] = useState('');
+
+  const setPage = (nextPage: AppPage) => {
+    setPageState(nextPage);
+    const nextPath = nextPage === 'home' ? '/' : nextPage === 'create' ? '/arrange' : nextPage === 'view' || nextPage === 'community' ? window.location.pathname : nextPage === 'create-community' ? '/community/new' : nextPage === 'join-community' ? '/community/join' : nextPage === 'account' ? '/account' : nextPage === 'recover' ? '/recover/verify' : window.location.pathname;
+    if (nextPath !== window.location.pathname) window.history.pushState({ page: nextPage }, '', nextPath);
+  };
+
 
   const players = useMemo(() => playerNames.map((item) => item.trim()).filter(Boolean), [playerNames]);
   const projectedSets = players.length >= 2 ? Math.ceil(players.length / playersPerSet) : 0;
   const isOwner = communityAccess === 'OWNER';
   const isAdmin = communityAccess === 'ADMIN';
   const canManageTournaments = isOwner || isAdmin;
+
+  useEffect(() => {
+    if (!communityMenuOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setCommunityMenuOpen(false); };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [communityMenuOpen]);
 
   useEffect(() => {
     const interval = window.setInterval(() => setClockNow(Date.now()), 1000);
@@ -134,7 +135,7 @@ export default function App() {
     setError('');
   }
 
-  async function loadSession(value: string) {
+  async function loadSession(value: string, updateUrl = true) {
     setError(''); setNotice('');
     const slug = extractCode(value, 'set');
     if (!slug) { setError('Enter a valid MatchSet link or set code.'); return; }
@@ -149,7 +150,7 @@ export default function App() {
       setPlayersPerSet(result.session.playersPerSet);
       setEditing(false);
       setPage('view');
-      window.history.pushState({}, '', `/set/${slug}`);
+      if (updateUrl && window.location.pathname !== `/set/${slug}`) window.history.pushState({}, '', `/set/${slug}`);
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not load this set.'); }
     finally { setLoading(false); }
   }
@@ -158,10 +159,15 @@ export default function App() {
     setLoading(true); setError(''); setNotice('');
     try {
       const url = new URL(window.location.href);
-      const invitedAdminToken = url.searchParams.get('adminToken');
+      // Capability secrets belong in the URL fragment, never the query string.
+      const fragmentParams = new URLSearchParams(url.hash.replace(/^#/, ''));
+      // Accept older query-string invitations once, then immediately scrub the secret.
+      const invitedAdminToken = fragmentParams.get('adminToken') || url.searchParams.get('adminToken');
       if (invitedAdminToken) {
         localStorage.setItem(`matchset-admin:${slug}`, invitedAdminToken);
+        fragmentParams.delete('adminToken');
         url.searchParams.delete('adminToken');
+        url.hash = fragmentParams.toString();
         window.history.replaceState({}, '', url.pathname + url.search + url.hash);
       }
       const savedOwnerToken = localStorage.getItem(`matchset-community-owner:${slug}`) || '';
@@ -196,9 +202,53 @@ export default function App() {
 
   useEffect(() => {
     const parts = window.location.pathname.split('/').filter(Boolean);
-    if (parts[0] === 'set' && parts[1]) void loadSession(parts[1]);
-    if (parts[0] === 'community' && parts[1]) void loadCommunity(parts[1]);
+    if (parts[0] === 'recover' && parts[1] === 'verify') {
+      const linkToken = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('token') || '';
+      if (linkToken) {
+        setRecoveryLinkToken(linkToken);
+        window.history.replaceState({}, '', window.location.pathname);
+        setPage('recover');
+        return;
+      }
+    }
+    if (parts[0] === 'set' && parts[1]) void loadSession(parts[1], false);
+    if (parts[0] === 'community' && parts[1] && parts[1] !== 'new' && parts[1] !== 'join') void loadCommunity(parts[1]);
   }, []);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const route = resolveAppRoute(window.location.pathname);
+      setError(''); setNotice('');
+      if (route.page === 'community' && route.slug) { void loadCommunity(route.slug); return; }
+      if (route.page === 'view' && route.slug) { void loadSession(route.slug, false); return; }
+      if (route.page === 'home') { setCommunity(null); setSession(null); }
+      if (route.page === 'recover') setRecoveryLinkToken(new URLSearchParams(window.location.hash.replace(/^#/, '')).get('token') || '');
+      setPageState(route.page);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  useEffect(() => {
+    if (page !== 'account') return;
+    let active = true;
+    setAccountLoaded(false);
+    void api<{ userId: string; csrfToken: string; passkeys: Array<{ credential_id: string; device_type: string | null; backed_up: boolean; created_at: string; last_used_at: string | null }>; recoveryCodeAcknowledged: boolean }>('/api/auth/me')
+      .then((result) => {
+        if (!active) return;
+        setAccountUserId(result.userId);
+        setAccountCsrf(result.csrfToken);
+        setAccountPasskeys(result.passkeys);
+        setRecoveryAcknowledged(result.recoveryCodeAcknowledged);
+      })
+      .catch((e) => {
+        if (!active) return;
+        setAccountUserId('');
+        if (!(e instanceof Error && e.message.includes('Sign in with a passkey'))) setError(e instanceof Error ? e.message : 'Could not load account.');
+      })
+      .finally(() => { if (active) setAccountLoaded(true); });
+    return () => { active = false; };
+  }, [page]);
 
   function startCreate() {
     window.history.pushState({}, '', '/');
@@ -264,7 +314,7 @@ export default function App() {
         const result = await api<{ role: string; adminToken: string }>(`/api/communities/${community.slug}/members/${member.id}/admin`, {
           method: 'POST', body: JSON.stringify({ ownerToken }),
         });
-        const invite = `${window.location.origin}/community/${community.slug}?adminToken=${encodeURIComponent(result.adminToken)}`;
+        const invite = `${window.location.origin}/community/${community.slug}#adminToken=${encodeURIComponent(result.adminToken)}`;
         setAdminInviteLink(invite);
         await loadCommunity(community.slug);
         setNotice(`Admin access created for ${member.name}. Share the private admin link with them.`);
@@ -471,6 +521,111 @@ export default function App() {
     finally { setLoading(false); }
   }
 
+  async function refreshAccount() {
+    const result = await api<{ userId: string; csrfToken: string; passkeys: typeof accountPasskeys; recoveryCodeAcknowledged: boolean }>('/api/auth/me');
+    setAccountUserId(result.userId); setAccountCsrf(result.csrfToken);
+    setAccountPasskeys(result.passkeys); setRecoveryAcknowledged(result.recoveryCodeAcknowledged);
+  }
+
+  async function createPasskeyAccount() {
+    setAccountBusy(true); setError(''); setRecoveryMessage('');
+    try {
+      const started = await api<{ options: unknown }>('/api/auth/register/options', { method: 'POST', body: '{}' });
+      const credential = await startRegistration({ optionsJSON: started.options as Parameters<typeof startRegistration>[0]['optionsJSON'] });
+      const completed = await api<{ csrfToken: string; recoveryCode: string }>('/api/auth/register/verify', { method: 'POST', body: JSON.stringify({ response: credential }) });
+      setAccountCsrf(completed.csrfToken); setRecoveryCode(completed.recoveryCode);
+      await refreshAccount(); setNotice('Passkey account created. Save your recovery code before continuing.');
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not create your passkey account.'); }
+    finally { setAccountBusy(false); }
+  }
+
+  async function signInWithPasskey() {
+    setAccountBusy(true); setError('');
+    try {
+      const started = await api<{ options: unknown }>('/api/auth/login/options', { method: 'POST', body: '{}' });
+      const credential = await startAuthentication({ optionsJSON: started.options as Parameters<typeof startAuthentication>[0]['optionsJSON'] });
+      await api('/api/auth/login/verify', { method: 'POST', body: JSON.stringify({ response: credential }) });
+      await refreshAccount(); setNotice('Signed in with your passkey.');
+    } catch (e) { setError(e instanceof Error ? e.message : 'Passkey sign-in failed.'); }
+    finally { setAccountBusy(false); }
+  }
+
+  async function rotateUnacknowledgedRecoveryCode() {
+    if (!accountCsrf) return;
+    setAccountBusy(true); setError('');
+    try {
+      const result = await api<{ recoveryCode: string }>('/api/auth/recovery-code/rotate', {
+        method: 'POST', headers: { 'X-CSRF-Token': accountCsrf }, body: '{}',
+      });
+      setRecoveryCode(result.recoveryCode);
+      setNotice('A replacement recovery code is ready. Save it before continuing.');
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not replace the recovery code.'); }
+    finally { setAccountBusy(false); }
+  }
+
+  async function acknowledgeRecoveryCode() {
+    if (!recoveryCode || !accountCsrf) return;
+    setAccountBusy(true); setError('');
+    try {
+      await api('/api/auth/recovery-code/acknowledge', { method: 'POST', headers: { 'X-CSRF-Token': accountCsrf }, body: JSON.stringify({ recoveryCode }) });
+      setRecoveryCode(''); await refreshAccount(); setNotice('Recovery code acknowledgement saved.');
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not acknowledge the recovery code.'); }
+    finally { setAccountBusy(false); }
+  }
+
+  async function addAccountPasskey() {
+    setAccountBusy(true); setError('');
+    try {
+      const started = await api<{ options: unknown }>('/api/auth/passkeys/register/options', { method: 'POST', headers: { 'X-CSRF-Token': accountCsrf }, body: '{}' });
+      const credential = await startRegistration({ optionsJSON: started.options as Parameters<typeof startRegistration>[0]['optionsJSON'] });
+      await api('/api/auth/passkeys/register/verify', { method: 'POST', headers: { 'X-CSRF-Token': accountCsrf }, body: JSON.stringify({ response: credential }) });
+      await refreshAccount(); setNotice('Additional passkey registered.');
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not add a passkey.'); }
+    finally { setAccountBusy(false); }
+  }
+
+  async function revokeAccountPasskey(credentialId: string) {
+    setAccountBusy(true); setError('');
+    try {
+      await api('/api/auth/passkeys/' + encodeURIComponent(credentialId), { method: 'DELETE', headers: { 'X-CSRF-Token': accountCsrf } });
+      await refreshAccount(); setNotice('Passkey revoked.');
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not revoke passkey.'); }
+    finally { setAccountBusy(false); }
+  }
+
+  async function signOutAccount() {
+    setAccountBusy(true); setError('');
+    try {
+      await api('/api/auth/logout', { method: 'POST', headers: { 'X-CSRF-Token': accountCsrf }, body: '{}' });
+      setAccountUserId(''); setAccountCsrf(''); setAccountPasskeys([]); setRecoveryAcknowledged(false);
+      setNotice('Signed out.');
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not sign out.'); }
+    finally { setAccountBusy(false); }
+  }
+
+  async function requestAccountRecovery(event: FormEvent) {
+    event.preventDefault(); setAccountBusy(true); setError(''); setRecoveryMessage('');
+    try {
+      const result = await api<{ message: string }>('/api/auth/recovery/start', { method: 'POST', body: JSON.stringify({ recoveryCode: recoveryCodeInput, email: recoveryEmail }) });
+      setRecoveryMessage(result.message);
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not start account recovery.'); }
+    finally { setAccountBusy(false); }
+  }
+
+  async function completeAccountRecovery() {
+    if (!recoveryLinkToken) return;
+    setAccountBusy(true); setError('');
+    try {
+      const started = await api<{ options: unknown }>('/api/auth/recovery/verify-email', { method: 'POST', body: JSON.stringify({ token: recoveryLinkToken }) });
+      const credential = await startRegistration({ optionsJSON: started.options as Parameters<typeof startRegistration>[0]['optionsJSON'] });
+      const completed = await api<{ csrfToken: string; recoveryCode: string }>('/api/auth/recovery/verify-passkey', { method: 'POST', body: JSON.stringify({ response: credential }) });
+      window.history.replaceState({}, '', '/'); setRecoveryLinkToken(''); setPage('account');
+      setAccountCsrf(completed.csrfToken); setRecoveryCode(completed.recoveryCode);
+      await refreshAccount(); setNotice('Account recovered. Save your replacement recovery code.');
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not complete account recovery.'); }
+    finally { setAccountBusy(false); }
+  }
+
   async function copyText(value: string, success: string) {
     try { await navigator.clipboard.writeText(value); setNotice(success); }
     catch { setNotice(value); }
@@ -481,33 +636,112 @@ export default function App() {
   }
 
   return <main className="shell">
-    <header className="topbar"><button className="brand" onClick={openHome} aria-label="MatchSet home"><span className="brand-mark">M</span> matchset</button><span className="top-note">PLAYER ARRANGEMENTS, MADE SIMPLE</span></header>
+    <header className="topbar"><button className="brand" onClick={openHome} aria-label="MatchSet home"><span className="brand-mark">M</span> matchset</button><span className="top-note">PLAYER ARRANGEMENTS, MADE SIMPLE</span><ActionButton variant="secondary" className="account-top-button" onClick={() => { setError(''); setPage('account'); }}>Account</ActionButton></header>
 
-    {page === 'home' && <section className="hero">
-      <div className="eyebrow"><span className="pulse" /> LESS TIME ORGANISING. MORE TIME PLAYING.</div>
-      <h1>Make the lineup.<br /><em>Get into the game.</em></h1>
-      <p className="intro">Put players into balanced teams, keep a record of every match, and see who wins most in your community.</p>
-      {recentCommunities.length > 0 && <section className="recent-communities">
-        <div className="panel-heading"><div><span className="section-kicker">SAVED ON THIS DEVICE</span><h2>My communities</h2></div><span className="count">{recentCommunities.length} SAVED</span></div>
-        <div className="recent-community-list">{recentCommunities.map((item) => <button className="recent-community-card" key={item.slug} onClick={() => void loadCommunity(item.slug, true)} disabled={loading}><span className="recent-community-mark">{item.name.slice(0, 1).toUpperCase()}</span><span><strong>{item.name}</strong><small>Open community</small></span><span className="arrow">↗</span></button>)}</div>
-      </section>}
-      <div className="choices">
-        <button className="choice create-choice" onClick={() => { setError(''); setPage('create-community'); }}><span className="choice-icon">＋</span><span><strong>Create a community</strong><small>Start a group and keep its match history.</small></span><span className="arrow">↗</span></button>
-        <button className="choice view-choice" onClick={() => { setError(''); setPage('join-community'); }}><span className="choice-icon">⌕</span><span><strong>View a community</strong><small>Open an invite link or community code.</small></span><span className="arrow">↗</span></button>
-        <button className="choice view-choice" onClick={startCreate}><span className="choice-icon">▦</span><span><strong>Quick arrangement</strong><small>Create a standalone shareable set.</small></span><span className="arrow">↗</span></button>
-        <button className="choice view-choice" onClick={() => { setShowViewInput((value) => !value); setError(''); }}><span className="choice-icon">↗</span><span><strong>View a set</strong><small>Open a standalone arrangement link.</small></span><span className="arrow">↗</span></button>
-        <button className="choice view-choice" onClick={() => { setQuickTournamentOpen((value) => !value); setError(''); }}><span className="choice-icon">⌁</span><span><strong>Quick tournament</strong><small>Choose a community and register groups.</small></span><span className="arrow">↗</span></button>
-      </div>
-      {showViewInput && <form className="lookup-form" onSubmit={(event) => { event.preventDefault(); void loadSession(viewLink); }}><label htmlFor="view-link">PASTE THE SHARED LINK OR SET CODE</label><div><input id="view-link" value={viewLink} onChange={(event) => setViewLink(event.target.value)} placeholder="https://…/set/abc123" autoFocus /><button className="primary-btn lookup-button" disabled={loading}>Open set ↗</button></div></form>}
-      {quickTournamentOpen && <section className="quick-tournament-picker">
-        <div className="panel-heading"><div><span className="section-kicker">START A TOURNAMENT</span><h2>Choose a community</h2></div><button type="button" className="text-button" onClick={() => setQuickTournamentOpen(false)}>Close</button></div>
-        <p className="hint">Tournament registration uses an existing community roster. Choose where these teams belong.</p>
-        {recentCommunities.length > 0
-          ? <div className="recent-community-list">{recentCommunities.map((item) => <button className="recent-community-card" key={item.slug} onClick={() => void loadCommunity(item.slug, true, 'tournaments')} disabled={loading}><span className="recent-community-mark">{item.name.slice(0, 1).toUpperCase()}</span><span><strong>{item.name}</strong><small>Open tournament tools</small></span><span className="arrow">↗</span></button>)}</div>
-          : <p className="empty-state">No saved communities on this device. Open a community first, or create one to use its roster for tournament registration.</p>}
-      </section>}
-      <div className="hero-foot"><span>NO ACCOUNT NEEDED</span><span>·</span><span>COMMUNITY HISTORY</span><span>·</span><span>SHARE INSTANTLY</span></div>
-      {error && <p className="error">{error}</p>}
+    {page === 'home' && <section className="home-dashboard workspace">
+      <header className="home-intro">
+        <div className="eyebrow"><span className="pulse" /> MATCHDAY WORKSPACE</div>
+        <h1>Make matchday <em>count.</em></h1>
+        <p className="intro">Bring your players together, organise teams, run matches and keep the results.</p>
+        <div className="home-primary-actions">
+          <button className="home-action home-action-primary" onClick={() => { setError(''); setPage('create-community'); }}>
+            <span className="home-action-icon">＋</span><span><strong>Create a community</strong><small>Start a group and manage its match history.</small></span><span className="home-action-arrow">↗</span>
+          </button>
+          <button className="home-action" onClick={() => { setError(''); setPage('join-community'); }}>
+            <span className="home-action-icon">⌕</span><span><strong>Open a community</strong><small>Use an invite link or community code.</small></span><span className="home-action-arrow">↗</span>
+          </button>
+        </div>
+      </header>
+
+      <section className="home-section home-communities">
+        <div className="home-section-heading">
+          <div><span className="section-kicker">YOUR MATCHDAY SPACES</span><h2>My communities</h2></div>
+          <span className="home-section-meta">{recentCommunities.length} RECENT</span>
+        </div>
+        {recentCommunities.length > 0 ? <div className="home-community-grid">
+          {recentCommunities.map((item) => <button className="home-community-card" key={item.slug} onClick={() => void loadCommunity(item.slug, true)} disabled={loading}>
+            <span className="home-community-mark">{item.name.slice(0, 1).toUpperCase()}</span>
+            <span className="home-community-copy"><strong>{item.name}</strong><small>Open community workspace</small></span>
+            <span className="home-action-arrow">↗</span>
+          </button>)}
+        </div> : <div className="home-empty-state">
+          <span className="home-empty-icon">◎</span>
+          <div><strong>No communities opened yet</strong><p>Open a community invite or create one to keep its players and match history together.</p></div>
+          <button className="secondary-btn" onClick={() => setPage('join-community')}>Open invite link</button>
+        </div>}
+      </section>
+
+      <section className="home-section home-tools">
+        <div className="home-section-heading"><div><span className="section-kicker">STANDALONE TOOLS</span><h2>Quick actions</h2></div></div>
+        <div className="home-tool-grid">
+          <button className="home-tool-card" onClick={startCreate}>
+            <span className="home-tool-icon">▦</span><span><strong>Quick arrangement</strong><small>Balance players into shareable sets.</small></span><span className="home-action-arrow">↗</span>
+          </button>
+          <button className="home-tool-card" onClick={() => { setShowViewInput((value) => !value); setError(''); }}>
+            <span className="home-tool-icon">↗</span><span><strong>Open a saved set</strong><small>Return to a standalone arrangement.</small></span><span className="home-action-arrow">↗</span>
+          </button>
+        </div>
+        {showViewInput && <form className="lookup-form" onSubmit={(event) => { event.preventDefault(); void loadSession(viewLink); }}>
+          <label htmlFor="view-link">SHARED LINK OR SET CODE</label>
+          <div><input id="view-link" value={viewLink} onChange={(event) => setViewLink(event.target.value)} placeholder="Paste a MatchSet link or code" autoFocus /><button className="primary-btn lookup-button" disabled={loading}>Open set ↗</button></div>
+        </form>}
+      </section>
+      {loading && <StatusMessage tone="info">Opening your MatchSet workspace…</StatusMessage>}
+      {error && <StatusMessage tone="error">{error}</StatusMessage>}
+    </section>}
+
+    {page === 'account' && <section className="workspace account-workspace">
+      <button className="back" onClick={openHome}>← Back</button>
+      <div className="section-kicker">MATCHSET IDENTITY</div><h1 className="page-title">Your <em>account.</em></h1>
+      <p className="subcopy">Use a passkey to access your MatchSet identity across communities. No account email or password is stored.</p>
+      {!accountLoaded ? <p className="hint">Checking account session…</p> : accountUserId ? <>
+        <div className="account-status"><strong>Signed in</strong><small>Account ID: {accountUserId}</small></div>
+        {recoveryCode && <div className="recovery-code-panel">
+          <strong>Save your recovery code now</strong>
+          <p>This code is shown once. It is required together with an email address if you lose every passkey.</p>
+          <code>{recoveryCode}</code>
+          <button className="secondary-btn" onClick={() => void copyText(recoveryCode, 'Recovery code copied. Store it somewhere private.')}>Copy recovery code</button>
+          <button className="primary-btn submit-button" disabled={accountBusy} onClick={() => void acknowledgeRecoveryCode()}>I saved my recovery code</button>
+        </div>}
+        {!recoveryCode && !recoveryAcknowledged && <div className="recovery-code-panel">
+          <strong>Recovery code not saved yet</strong>
+          <p>If you closed the setup screen before saving it, generate a replacement now.</p>
+          <button className="primary-btn submit-button" disabled={accountBusy} onClick={() => void rotateUnacknowledgedRecoveryCode()}>Generate replacement recovery code</button>
+        </div>}
+        <div className="account-panel">
+          <div className="panel-heading"><div><span className="section-kicker">SECURITY</span><h2>Passkeys</h2></div><span className="count">{accountPasskeys.length} REGISTERED</span></div>
+          {accountPasskeys.map((key) => <div className="passkey-row" key={key.credential_id}>
+            <span><strong>{key.device_type || 'Passkey'}</strong><small>{key.backed_up ? 'Synced / backed up' : 'Device-bound or backup status unavailable'}</small></span>
+            <button className="text-button" disabled={accountBusy || accountPasskeys.length <= 1} onClick={() => void revokeAccountPasskey(key.credential_id)}>Revoke</button>
+          </div>)}
+          <button className="secondary-btn" disabled={accountBusy} onClick={() => void addAccountPasskey()}>＋ Add another passkey</button>
+          <p className="hint">Keep at least two passkeys on separate devices where possible. You cannot revoke your last active passkey.</p>
+        </div>
+        <button className="secondary-btn" disabled={accountBusy} onClick={() => void signOutAccount()}>Sign out</button>
+      </> : <>
+        <div className="account-panel">
+          <h2>Passkey access</h2>
+          <p className="hint">Create a new identity or sign in using a passkey already registered with MatchSet.</p>
+          <button className="primary-btn submit-button" disabled={accountBusy} onClick={() => void createPasskeyAccount()}>{accountBusy ? 'Please wait…' : 'Create account with passkey'} <span>↗</span></button>
+          <button className="secondary-btn" disabled={accountBusy} onClick={() => void signInWithPasskey()}>Sign in with passkey</button>
+        </div>
+        <form className="form-card" onSubmit={requestAccountRecovery}>
+          <h2>Recover an account</h2>
+          <p className="hint">You need your one-time recovery code and access to an email address you can receive a verification link at. The address is not saved to your MatchSet account.</p>
+          <label className="field-label">RECOVERY CODE<input value={recoveryCodeInput} onChange={(e) => setRecoveryCodeInput(e.target.value)} autoComplete="off" required /></label>
+          <label className="field-label">CURRENT EMAIL ADDRESS<input type="email" value={recoveryEmail} onChange={(e) => setRecoveryEmail(e.target.value)} autoComplete="email" required /></label>
+          <button className="primary-btn submit-button" disabled={accountBusy}>Send recovery link <span>↗</span></button>
+          {recoveryMessage && <p className="success-note">{recoveryMessage}</p>}
+        </form>
+      </>}
+      {error && <StatusMessage tone="error">{error}</StatusMessage>}
+    </section>}
+
+    {page === 'recover' && <section className="workspace account-workspace">
+      <div className="section-kicker">ACCOUNT RECOVERY</div><h1 className="page-title">Restore your <em>access.</em></h1>
+      <p className="subcopy">Your email link is valid for a short time. Continue to register a new passkey, then save the replacement recovery code.</p>
+      <button className="primary-btn submit-button" disabled={accountBusy || !recoveryLinkToken} onClick={() => void completeAccountRecovery()}>{accountBusy ? 'Verifying…' : 'Verify and register new passkey'} <span>↗</span></button>
+      {error && <StatusMessage tone="error">{error}</StatusMessage>}
     </section>}
 
     {page === 'create-community' && <section className="workspace">
@@ -520,7 +754,7 @@ export default function App() {
         <p className="hint">You become the community organiser. Keep your browser data safe: organiser permissions are stored on this device.</p>
         <button className="primary-btn submit-button" disabled={loading}>{loading ? 'Creating…' : 'Create community'} <span>↗</span></button>
       </form>
-      {error && <p className="error">{error}</p>}
+      {error && <StatusMessage tone="error">{error}</StatusMessage>}
     </section>}
 
     {page === 'join-community' && <section className="workspace">
@@ -532,7 +766,7 @@ export default function App() {
         <p className="hint">Invite links are read-only. Only the community creator can add players or manage matches.</p>
         <button className="primary-btn submit-button" disabled={loading}>{loading ? 'Opening…' : 'View community'} <span>↗</span></button>
       </form>
-      {error && <p className="error">{error}</p>}
+      {error && <StatusMessage tone="error">{error}</StatusMessage>}
     </section>}
 
     {page === 'community' && community && <section className="workspace community-workspace">
@@ -552,18 +786,18 @@ export default function App() {
         <div><strong>{matches.length}</strong><span>MATCHES</span></div>
         <div><strong>{matches.reduce((total, match) => total + (match.rotationState?.games.length ?? (match.winningTeamId !== null ? 1 : 0)), 0)}</strong><span>RESULTS</span></div>
       </div>
-      <nav className="community-tabs" aria-label="Community sections">
+      <SectionTabs ariaLabel="Community sections">
         <button className={communityTab === 'overview' ? 'active' : ''} onClick={() => setCommunityTab('overview')}>Overview</button>
         <button className={communityTab === 'matches' ? 'active' : ''} onClick={() => setCommunityTab('matches')}>Matches <span>{matches.length}</span></button>
         {isOwner && <button className={communityTab === 'create-match' ? 'active' : ''} onClick={() => setCommunityTab('create-match')}>Create match <span>＋</span></button>}
         <button className={communityTab === 'tournaments' ? 'active' : ''} onClick={() => setCommunityTab('tournaments')}>Tournaments <span>{tournaments.length}</span></button>
-      </nav>
+      </SectionTabs>
       {communityTab === 'create-match' && isOwner && <div className="community-panel">
         <div className="panel-heading"><div><span className="section-kicker">ORGANISER TOOLS</span><h2>Create a match</h2></div></div>
         <form className="community-form" onSubmit={createCommunityMatch}>
           <label className="field-label">MATCH NAME<input value={matchTitle} onChange={(e) => setMatchTitle(e.target.value)} placeholder="e.g. Saturday evening games" maxLength={80} required /></label>
           <div className="roster-heading"><span className="field-label">SELECT PLAYERS ({selectedMemberIds.length} SELECTED)</span><button type="button" className="text-button" onClick={() => setSelectedMemberIds(selectedMemberIds.length === members.length ? [] : members.map((member) => member.id))}>{selectedMemberIds.length === members.length ? 'Clear all' : 'Select all'}</button></div>
-          <div className="roster-select">{members.map((member) => <label className="roster-option" key={member.id}><input type="checkbox" checked={selectedMemberIds.includes(member.id)} onChange={() => toggleMember(member.id)} disabled={member.id === currentMemberId} /><span>{member.name}</span></label>)}</div>
+          <div className="roster-select">{members.map((member) => <label className="roster-option" key={member.id}><input type="checkbox" checked={selectedMemberIds.includes(member.id)} onChange={() => toggleMember(member.id)} disabled={member.id === currentMemberId} /><span>{memberLabel(member)}</span></label>)}</div>
           <div className="form-bottom"><label className="size-label">PLAYERS PER TEAM<select value={playersPerTeam} onChange={(e) => setPlayersPerTeam(Number(e.target.value))}>{Array.from({ length: 19 }, (_, i) => i + 2).map((n) => <option key={n} value={n}>{n} players</option>)}</select></label><span className="count">{Math.ceil(selectedMemberIds.length / playersPerTeam)} TEAMS</span></div>
           <div className="form-bottom"><label className="size-label">GOALS TO WIN<select value={goalsToWin} onChange={(e) => setGoalsToWin(Number(e.target.value))}>{[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n} goal{n === 1 ? '' : 's'}</option>)}</select></label><label className="size-label">TIME PER GAME<select value={durationMinutes} onChange={(e) => setDurationMinutes(Number(e.target.value))}>{[5, 10, 15, 20, 25, 30, 45, 60].map((n) => <option key={n} value={n}>{n} minutes</option>)}</select></label></div>
           <p className="hint">Teams are balanced automatically. Each rotation game ends at the goal target or when its timer expires. Every selected player is assigned exactly once.</p>
@@ -575,14 +809,14 @@ export default function App() {
           <div className="panel-heading"><div><span className="section-kicker">ALL-TIME</span><h2>Leaderboard</h2></div></div>
           {leaderboard.length === 0 ? <p className="empty-state">No results yet. Record a match winner to start the leaderboard.</p> : <div className="leaderboard">
             <div className="leader-row leader-head"><span>PLAYER</span><span>W</span><span>D</span><span>L</span><span>WIN %</span></div>
-            {leaderboard.map((entry, index) => <div className="leader-row" key={entry.memberId}><span><b>{String(index + 1).padStart(2, '0')}</b>{entry.name}</span><strong>{entry.wins}</strong><span>{entry.draws || 0}</span><span>{entry.losses}</span><span>{entry.winRate}%</span></div>)}
+            {leaderboard.map((entry, index) => <div className="leader-row" key={entry.memberId}><span><b>{String(index + 1).padStart(2, '0')}</b>{memberLabel(entry)}</span><strong>{entry.wins}</strong><span>{entry.draws || 0}</span><span>{entry.losses}</span><span>{entry.winRate}%</span></div>)}
           </div>}
         </section>
         <section className="community-panel">
           <div className="panel-heading"><div><span className="section-kicker">ROSTER</span><h2>Players</h2></div><span className="count">{members.length} MEMBERS</span></div>
-          <div className="member-list">{members.map((member) => <div className="member-item" key={member.id}><span className="member-avatar">{member.name.slice(0,1).toUpperCase()}</span>{member.name}{member.id === currentMemberId && <span className="you-label">CREATOR</span>}</div>)}</div>
+          <div className="member-list">{members.map((member) => <div className="member-item" key={member.id}><span className="member-avatar">{member.name.slice(0,1).toUpperCase()}</span>{memberLabel(member)}{member.id === currentMemberId && <span className="you-label">CREATOR</span>}</div>)}</div>
           {isOwner && <form className="add-member-form" onSubmit={addMember}><input value={newMemberName} onChange={(e) => setNewMemberName(e.target.value)} placeholder="Add a player to the roster" maxLength={40} required /><button className="share-btn" disabled={loading}>Add player</button></form>}
-          {isOwner && <div className="role-management"><span className="field-label">COMMUNITY ROLES</span>{members.filter((member) => member.id !== currentMemberId).map((member) => <div className="role-row" key={member.id}><span>{member.name}<small>{member.role === 'ADMIN' ? 'ADMIN' : 'MEMBER'}</small></span><button className="text-button" disabled={loading} onClick={() => void changeMemberRole(member)}>{member.role === 'ADMIN' ? 'Remove admin' : 'Make admin'}</button></div>)}</div>}
+          {isOwner && <div className="role-management"><span className="field-label">COMMUNITY ROLES</span>{members.filter((member) => member.id !== currentMemberId).map((member) => <div className="role-row" key={member.id}><span>{memberLabel(member)}<small>{member.role === 'ADMIN' ? 'ADMIN' : 'MEMBER'}</small></span><button className="text-button" disabled={loading} onClick={() => void changeMemberRole(member)}>{member.role === 'ADMIN' ? 'Remove admin' : 'Make admin'}</button></div>)}</div>}
           {!isOwner && <p className="read-only-note">Roster and roles are managed by the community owner.</p>}
           {adminInviteLink && <div className="admin-invite"><strong>Private admin access link</strong><p>Send this link directly to the appointed admin. Anyone with it can manage tournament groups until the owner revokes their role.</p><div><input readOnly value={adminInviteLink} /><button className="share-btn" onClick={() => void copyText(adminInviteLink, 'Admin link copied.')}>Copy link</button></div></div>}
         </section>
@@ -592,28 +826,36 @@ export default function App() {
         {canManageTournaments && <form className="community-form tournament-form" onSubmit={createTournament}>
           <div className="tournament-form-intro"><div><span className="section-kicker">NEW COMPETITION</span><h3>Create tournament</h3></div><span className="count">{draftTournamentGroups.length} GROUPS</span></div>
           <label className="field-label">TOURNAMENT NAME<input value={tournamentName} onChange={(event) => setTournamentName(event.target.value)} placeholder="e.g. MatchSet Cup" maxLength={80} required /></label>
-          <label className="field-label group-count-field">NUMBER OF GROUPS<select value={draftTournamentGroups.length} onChange={(event) => resizeDraftGroups(Number(event.target.value))}>{[2, 3, 4, 5, 6, 8].map((count) => <option key={count} value={count}>{count} groups</option>)}</select></label>
-          <div className="tournament-draft-groups">{draftTournamentGroups.map((group, groupIndex) => <section className="tournament-draft-group" key={group.name}>
-            <div className="tournament-draft-group-head"><div><span className="section-kicker">REGISTRATION GROUP {String(groupIndex + 1).padStart(2, '0')}</span><h4>{group.name}</h4></div><span className="count">{group.teams.length} TEAMS</span></div>
-            {group.teams.map((team, teamIndex) => {
-              const registeredElsewhere = draftTournamentGroups.flatMap((otherGroup, otherGroupIndex) => otherGroup.teams.flatMap((otherTeam, otherTeamIndex) =>
-                otherGroupIndex === groupIndex && otherTeamIndex === teamIndex ? [] : otherTeam.memberIds));
-              return <article className="tournament-draft-team" key={teamIndex}>
-                <div className="tournament-team-fields"><label className="field-label">TEAM NAME<input value={team.name} onChange={(event) => updateDraftTeam(groupIndex, teamIndex, { name: event.target.value })} placeholder={`Team ${teamIndex + 1}`} maxLength={40} /></label><span className="count">{team.memberIds.length} PLAYERS</span></div>
-                <div className="tournament-player-picker"><span className="field-label">REGISTER PLAYERS</span><div className="tournament-player-options">{members.map((member) => <label className={`tournament-player-option ${team.memberIds.includes(member.id) ? 'selected' : ''}`} key={member.id}><input type="checkbox" checked={team.memberIds.includes(member.id)} disabled={registeredElsewhere.includes(member.id)} onChange={(event) => updateDraftTeam(groupIndex, teamIndex, { memberIds: event.target.checked ? [...team.memberIds, member.id] : team.memberIds.filter((id) => id !== member.id) })} /><span>{member.name}</span>{registeredElsewhere.includes(member.id) && <small>REGISTERED</small>}</label>)}</div></div>
-                {group.teams.length > 1 && <button type="button" className="text-button remove-draft-team" onClick={() => setDraftTournamentGroups((current) => current.map((item, index) => index === groupIndex ? { ...item, teams: item.teams.filter((_, itemIndex) => itemIndex !== teamIndex) } : item))}>Remove team</button>}
-              </article>;
-            })}
-            <button type="button" className="add-draft-team" onClick={() => setDraftTournamentGroups((current) => current.map((item, index) => index === groupIndex ? { ...item, teams: [...item.teams, { name: `Team ${item.teams.length + 1}`, memberIds: [] }] } : item))}>＋ Add team to {group.name}</button>
-          </section>)}</div>
-          <div className="tournament-review"><strong>Registration review</strong><span>{draftTournamentGroups.reduce((total, group) => total + group.teams.length, 0)} teams · {draftTournamentGroups.reduce((total, group) => total + group.teams.reduce((sum, team) => sum + team.memberIds.length, 0), 0)} player registrations</span><small>Each player can only be registered once in this tournament. Confirm every group before saving.</small></div>
-          <button className="primary-btn submit-button" disabled={loading}>{loading ? 'Saving…' : 'Save tournament draw'} <span>↗</span></button>
+          <label className="field-label">NUMBER OF GROUPS<select value={tournamentGroupCount} onChange={(event) => setTournamentGroupCount(Number(event.target.value))}>{[2, 3, 4, 5, 6, 8].map((count) => <option key={count} value={count}>{count} groups</option>)}</select></label>
+          <div className="tournament-draft-teams">{tournamentTeams.map((team, index) => {
+            const assignedElsewhere = new Set(tournamentTeams.flatMap((otherTeam, teamIndex) => teamIndex === index ? [] : otherTeam.memberIds));
+            return <div className="tournament-draft-team" key={index}>
+              <div className="tournament-team-heading"><span className="team-number">TEAM {index + 1}</span><span className="team-player-count">{team.memberIds.length} selected</span></div>
+              <label className="field-label tournament-team-name">TEAM NAME<input value={team.name} onChange={(event) => updateDraftTeam(index, { name: event.target.value })} placeholder={`Team ${index + 1}`} maxLength={40} /></label>
+              <fieldset className="tournament-player-picker">
+                <legend>Choose players</legend>
+                {members.length === 0 ? <p className="hint">Add players to the community roster first.</p> : <div className="tournament-player-options">{members.map((member) => {
+                  const selected = team.memberIds.includes(member.id);
+                  const used = assignedElsewhere.has(member.id);
+                  return <label className={`tournament-player-option${selected ? ' selected' : ''}${used ? ' unavailable' : ''}`} key={member.id}>
+                    <input type="checkbox" checked={selected} disabled={used} onChange={() => updateDraftTeam(index, { memberIds: selected ? team.memberIds.filter((id) => id !== member.id) : [...team.memberIds, member.id] })} />
+                    <span>{member.name}</span>
+                    {used && <small>Assigned</small>}
+                  </label>;
+                })}</div>}
+              </fieldset>
+              {tournamentTeams.length > 2 && <button type="button" className="text-button remove-tournament-team" onClick={() => setTournamentTeams((current) => current.filter((_, teamIndex) => teamIndex !== index))}>Remove team</button>}
+            </div>;
+          })}</div>
+          <button type="button" className="text-button" onClick={() => setTournamentTeams((current) => [...current, { name: `Team ${current.length + 1}`, memberIds: [] }])}>＋ Add team</button>
+          <p className="hint">Select at least two players per team. Teams are distributed across groups automatically; you can move teams between groups after creation.</p>
+          <button className="primary-btn submit-button" disabled={loading}>{loading ? 'Saving…' : 'Create tournament groups'} <span>↗</span></button>
         </form>}
         {tournaments.length === 0 ? <p className="empty-state">No tournaments yet. {canManageTournaments ? 'Create the first tournament above.' : 'An owner or admin can create tournament groups.'}</p> : tournaments.map((tournament) => <section className="tournament-card" key={tournament.id}>
           <div className="panel-heading"><div><span className="section-kicker">TOURNAMENT</span><h3>{tournament.name}</h3></div><span className="count">{tournament.groups.length} GROUPS</span></div>
           <div className="tournament-groups">{tournament.groups.map((group) => <div className="tournament-group" key={group.id}>
             <h4>{group.name}</h4>
-            {group.teams.map((team) => <div className="tournament-team" key={team.id}><span><strong>{team.name}</strong><small>{team.members.map((member) => member.name).join(' · ')}</small></span>
+            {group.teams.map((team) => <div className="tournament-team" key={team.id}><span><strong>{team.name}</strong><small>{team.members.map((member) => memberLabel(member)).join(' · ')}</small></span>
               {canManageTournaments && <select aria-label={`Move ${team.name} to group`} value={group.id} disabled={loading} onChange={(event) => void moveTournamentTeam(tournament, team.id, event.target.value)}>{tournament.groups.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}</select>}
             </div>)}
           </div>)}</div>
@@ -622,36 +864,19 @@ export default function App() {
       {communityTab === 'matches' && <section className="community-panel history-panel">
         <div className="panel-heading"><div><span className="section-kicker">COMMUNITY RECORD</span><h2>Match history</h2></div><span className="count">LATEST 100</span></div>
         {matches.length === 0 ? <p className="empty-state">No matches yet. The community creator can create the first one.</p> : <div className="match-history">
-          {matches.map((match) => {
-            const resultToken = localStorage.getItem('matchset-result:' + match.id) || '';
-            const rotation = match.rotationState;
-            const activeTeams = rotation?.activeTeamIds.map((id) => match.teams.find((team) => team.id === id)).filter((team): team is Team => Boolean(team)) || [];
-            const waitingTeams = rotation?.waitingTeamIds.map((id) => match.teams.find((team) => team.id === id)).filter((team): team is Team => Boolean(team)) || [];
-            return <article className="history-match" key={match.id}>
-              <div className="history-match-head"><div><h3>{match.title}</h3><span>{new Date(match.createdAt).toLocaleDateString()} · {match.teams.length} teams · {rotation ? rotation.games.length + ' games played' : 'Legacy match'}</span></div><span className={rotation || match.winningTeamId ? 'result-status complete' : 'result-status'}>{rotation ? 'ROTATION ACTIVE' : match.winningTeamId ? 'TEAM ' + match.winningTeamId + ' WON' : 'AWAITING RESULT'}</span></div>
-              {rotation ? <>
-                <div className="rotation-current"><div className="rotation-label">ON THE PITCH · CURRENT GAME</div>
-                  <div className="timer-panel">
-                    <strong className="match-score">{(rotation.score?.[0] ?? 0)} — {(rotation.score?.[1] ?? 0)}</strong>
-                    <span className="timer-readout">{(() => { const remaining = rotation.timerPausedAt ? (rotation.pausedRemainingMs ?? 0) : Math.max(0, (rotation.durationSeconds ?? 600) * 1000 - (clockNow - new Date(rotation.timerStartedAt || match.createdAt).getTime())); return String(Math.floor(remaining / 60000)).padStart(2,'0') + ':' + String(Math.floor((remaining % 60000) / 1000)).padStart(2,'0'); })()}</span>
-                    <small>FIRST TO {rotation.goalsToWin ?? 1} · {Math.round((rotation.durationSeconds ?? 600) / 60)} MINUTES</small>
-                    {isOwner && resultToken && <button className="text-button" disabled={loading} onClick={() => void controlRotationTimer(match, rotation.timerPausedAt ? 'RESUME' : 'PAUSE')}>{rotation.timerPausedAt ? 'Resume timer' : 'Pause timer'}</button>}
-                  </div>
-                  <div className="history-teams">{activeTeams.map((team, index) => <div className="history-team active-team" key={team.id}><div><b>SET {team.id}</b><span>{index === 0 ? 'TEAM A' : 'TEAM B'}</span></div><p>{team.players.map((player) => player.name).join(' · ')}</p></div>)}</div>
-                  {isOwner && resultToken && <div className="goal-entry">
-                    <label className="field-label">SCORING TEAM<select value={goalSelections[match.id]?.teamId ?? activeTeams[0]?.id ?? ''} onChange={(e) => setGoalSelections((current) => ({ ...current, [match.id]: { teamId: Number(e.target.value), scorerId: '', assisterId: '' } }))}>{activeTeams.map((team) => <option key={team.id} value={team.id}>Set {team.id}</option>)}</select></label>
-                    {(() => { const team = match.teams.find((item) => item.id === (goalSelections[match.id]?.teamId ?? activeTeams[0]?.id)); const selection = goalSelections[match.id]; return team ? <><label className="field-label">GOAL SCORER<select value={selection?.scorerId ?? ''} onChange={(e) => setGoalSelections((current) => ({ ...current, [match.id]: { teamId: team.id, scorerId: e.target.value, assisterId: current[match.id]?.assisterId === e.target.value ? '' : (current[match.id]?.assisterId ?? '') } }))}><option value="">Select scorer</option>{team.players.map((player) => <option key={player.id} value={player.id}>{player.name}</option>)}</select></label><label className="field-label">ASSIST (OPTIONAL)<select value={selection?.assisterId ?? ''} onChange={(e) => setGoalSelections((current) => ({ ...current, [match.id]: { teamId: team.id, scorerId: current[match.id]?.scorerId ?? '', assisterId: e.target.value } }))}><option value="">No assist</option>{team.players.filter((player) => player.id !== selection?.scorerId).map((player) => <option key={player.id} value={player.id}>{player.name}</option>)}</select></label><button className="record-win-btn" disabled={loading || !selection?.scorerId} onClick={() => void recordGoal(match, team.id)}>Record goal</button></> : null; })()}
-                  </div>}
-                  {isOwner && resultToken && <div className="rotation-controls"><button className="record-win-btn draw-btn" disabled={loading || activeTeams.length !== 2} onClick={() => void recordRotationOutcome(match, 'DRAW')}>Declare draw</button></div>}
-                </div>
-                <div className="rotation-queue"><strong>WAITING QUEUE</strong><span>{waitingTeams.length ? waitingTeams.map((team) => 'Set ' + team.id).join(' · ') : 'No teams waiting — next rotation will bring teams back in.'}</span></div>
-                {rotation.goals && rotation.goals.length > 0 && <div className="rotation-goal-history"><strong>GOALS THIS GAME</strong>{rotation.goals.map((goal, index) => <p key={index}>Set {goal.teamId}: {goal.scorerName}{goal.assisterName ? ' · Assist: ' + goal.assisterName : ''}</p>)}</div>}
-                {rotation.games.length > 0 && <div className="rotation-last-game"><span>LAST RESULT</span><strong>{rotation.games[rotation.games.length - 1].outcome === 'DRAW' ? 'Draw' : 'Set ' + rotation.games[rotation.games.length - 1].winnerTeamId + ' won'}</strong>{isOwner && resultToken && <button className="text-button" disabled={loading} onClick={() => void undoRotationOutcome(match)}>Undo last result</button>}</div>}
-                <details className="rotation-history"><summary>Game history ({rotation.games.length})</summary>{rotation.games.length === 0 ? <p className="hint">No games recorded yet.</p> : <ol>{rotation.games.map((game) => <li key={game.number}>Game {game.number}: Set {game.teamAId} {game.score?.[0] ?? '—'}–{game.score?.[1] ?? '—'} Set {game.teamBId} — {game.outcome === 'DRAW' ? 'Draw' : 'Set ' + game.winnerTeamId + ' won'}{game.goals?.length ? ' · ' + game.goals.map((goal) => goal.scorerName + (goal.assisterName ? ' (A: ' + goal.assisterName + ')' : '')).join(', ') : ''}</li>)}</ol>}</details>
-                {!isOwner && <p className="read-only-note">The organiser records results and controls rotation.</p>}
-              </> : <div className="history-teams">{match.teams.map((team) => <div className={match.winningTeamId === team.id ? 'history-team winner' : 'history-team'} key={team.id}><div><b>TEAM {team.id}</b>{match.winningTeamId === team.id && <span>WINNER</span>}</div><p>{team.players.map((player) => player.name).join(' · ')}</p></div>)}</div>}
-            </article>;
-          })}
+          {matches.map((match) => <LiveMatchCard
+            key={match.id}
+            match={match}
+            isOwner={isOwner}
+            loading={loading}
+            clockNow={clockNow}
+            goalSelections={goalSelections}
+            setGoalSelections={setGoalSelections}
+            onRecordGoal={recordGoal}
+            onControlTimer={controlRotationTimer}
+            onRecordOutcome={recordRotationOutcome}
+            onUndo={undoRotationOutcome}
+          />)}
         </div>}
       </section>}
       {isAdmin && <p className="read-only-note">Admin access: you can create tournaments and manage groupings. The community owner controls members and roles.</p>}
