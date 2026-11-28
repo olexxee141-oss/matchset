@@ -275,7 +275,16 @@ export default function App() {
 
   function resizeDraftGroups(count: number) {
     setDraftTournamentGroups((current) => {
-      if (count <= current.length) return current.slice(0, count);
+      if (count < current.length) {
+        const removedGroups = current.slice(count);
+        const hasRegistration = removedGroups.some((group) => group.teams.some((team, index) =>
+          team.memberIds.length > 0 || team.name.trim() !== `Team ${index + 1}`));
+        if (hasRegistration) {
+          setError('Move or remove registrations from the last groups before reducing the group count.');
+          return current;
+        }
+        return current.slice(0, count);
+      }
       return [
         ...current,
         ...Array.from({ length: count - current.length }, (_, offset) => ({
@@ -467,7 +476,7 @@ export default function App() {
   }
   function openHome() {
     window.history.pushState({}, '', '/');
-    setPage('home'); setSession(null); setCommunity(null); setCommunityAccess('VIEWER'); setRecentCommunities(() => { try { return JSON.parse(localStorage.getItem('matchset-recent-communities') || '[]') as Community[]; } catch { return []; } }); setError(''); setNotice(''); setShowViewInput(false);
+    setPage('home'); setSession(null); setCommunity(null); setCommunityAccess('VIEWER'); setQuickTournamentOpen(false); setRecentCommunities(() => { try { return JSON.parse(localStorage.getItem('matchset-recent-communities') || '[]') as Community[]; } catch { return []; } }); setError(''); setNotice(''); setShowViewInput(false);
   }
 
   return <main className="shell">
