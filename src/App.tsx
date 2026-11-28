@@ -828,7 +828,6 @@ export default function App() {
           <label className="field-label">TOURNAMENT NAME<input value={tournamentName} onChange={(event) => setTournamentName(event.target.value)} placeholder="e.g. MatchSet Cup" maxLength={80} required /></label>
           <label className="field-label">NUMBER OF GROUPS<select value={draftTournamentGroups.length} onChange={(event) => resizeDraftGroups(Number(event.target.value))}>{[2, 3, 4, 5, 6, 8].map((count) => <option key={count} value={count}>{count} groups</option>)}</select></label>
           <div className="tournament-draft-groups">{draftTournamentGroups.map((group, groupIndex) => {
-            const assignedElsewhere = new Set(draftTournamentGroups.flatMap((otherGroup, otherGroupIndex) => otherGroupIndex === groupIndex ? [] : otherGroup.teams.flatMap((team) => team.memberIds)));
             return <section className="tournament-draft-group" key={groupIndex}>
               <div className="tournament-group-heading">
                 <label className="field-label">GROUP NAME<input value={group.name} onChange={(event) => setDraftTournamentGroups((current) => current.map((item, index) => index === groupIndex ? { ...item, name: event.target.value } : item))} maxLength={40} /></label>
