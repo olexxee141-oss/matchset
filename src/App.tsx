@@ -208,7 +208,12 @@ export default function App() {
     const parts = window.location.pathname.split('/').filter(Boolean);
     if (parts[0] === 'recover' && parts[1] === 'verify') {
       const linkToken = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('token') || '';
-      if (linkToken) { setRecoveryLinkToken(linkToken); setPage('recover'); return; }
+      if (linkToken) {
+        setRecoveryLinkToken(linkToken);
+        window.history.replaceState({}, '', window.location.pathname);
+        setPage('recover');
+        return;
+      }
     }
     if (parts[0] === 'set' && parts[1]) void loadSession(parts[1]);
     if (parts[0] === 'community' && parts[1]) void loadCommunity(parts[1]);
