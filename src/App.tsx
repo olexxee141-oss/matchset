@@ -9,7 +9,8 @@ type TournamentGroup = { id: string; name: string; teams: TournamentTeam[] };
 type Tournament = { id: string; name: string; createdAt: string; groups: TournamentGroup[] };
 type DraftTournamentTeam = { name: string; memberIds: string[] };
 type Team = { id: number; players: Array<{ id: string; name: string }> };
-type RotationGoal = { teamId: number; scorerId: string; scorerName: string; assisterId: string | null; assisterName: string | null; scoredAt: string };\ntype RotationGame = { number: number; teamAId: number; teamBId: number; outcome: 'TEAM_A_WIN' | 'TEAM_B_WIN' | 'DRAW'; winnerTeamId: number | null; playedAt: string; goals?: RotationGoal[]; score?: [number, number] };
+type RotationGoal = { teamId: number; scorerId: string; scorerName: string; assisterId: string | null; assisterName: string | null; scoredAt: string };
+type RotationGame = { number: number; teamAId: number; teamBId: number; outcome: 'TEAM_A_WIN' | 'TEAM_B_WIN' | 'DRAW'; winnerTeamId: number | null; playedAt: string; goals?: RotationGoal[]; score?: [number, number] };
 type RotationState = { status: 'ACTIVE' | 'ENDED'; activeTeamIds: number[]; waitingTeamIds: number[]; games: RotationGame[]; goalsToWin?: number; durationSeconds?: number; score?: [number, number]; goals?: RotationGoal[]; timerStartedAt?: string; timerPausedAt?: string | null; pausedRemainingMs?: number | null };
 type CommunityMatch = { id: string; title: string; teams: Team[]; winningTeamId: number | null; rotationState?: RotationState | null; createdAt: string; completedAt: string | null };
 type LeaderboardEntry = { memberId: string; name: string; wins: number; losses: number; draws?: number; matchesPlayed: number; winRate: number };
@@ -87,13 +88,34 @@ export default function App() {
   const [ownerToken, setOwnerToken] = useState('');
   const [matchTitle, setMatchTitle] = useState('');
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
-  const [playersPerTeam, setPlayersPerTeam] = useState(4);\n  const [goalsToWin, setGoalsToWin] = useState(1);\n  const [durationMinutes, setDurationMinutes] = useState(10);\n  const [clockNow, setClockNow] = useState(Date.now());\n  const [goalSelections, setGoalSelections] = useState<Record<string, { teamId: number; scorerId: string; assisterId: string }>>({});\n  const [timerSyncing, setTimerSyncing] = useState<Record<string, boolean>>({});
+  const [playersPerTeam, setPlayersPerTeam] = useState(4);
+  const [goalsToWin, setGoalsToWin] = useState(1);
+  const [durationMinutes, setDurationMinutes] = useState(10);
+  const [clockNow, setClockNow] = useState(Date.now());
+  const [goalSelections, setGoalSelections] = useState<Record<string, { teamId: number; scorerId: string; assisterId: string }>>({});
+  const [timerSyncing, setTimerSyncing] = useState<Record<string, boolean>>({});
 
   const players = useMemo(() => playerNames.map((item) => item.trim()).filter(Boolean), [playerNames]);
   const projectedSets = players.length >= 2 ? Math.ceil(players.length / playersPerSet) : 0;
   const isOwner = communityAccess === 'OWNER';
   const isAdmin = communityAccess === 'ADMIN';
-  const canManageTournaments = isOwner || isAdmin;\n\n  useEffect(() => {\n    const interval = window.setInterval(() => setClockNow(Date.now()), 1000);\n    return () => window.clearInterval(interval);\n  }, []);\n\n  useEffect(() => {\n    if (!community || !isOwner) return;\n    for (const match of matches) {\n      const rotation = match.rotationState;\n      if (!rotation || rotation.status !== 'ACTIVE' || rotation.timerPausedAt || !rotation.timerStartedAt) continue;\n      const remaining = Math.max(0, (rotation.durationSeconds ?? 600) * 1000 - (clockNow - new Date(rotation.timerStartedAt).getTime()));\n      const key = match.id + ':' + rotation.games.length;\n      if (remaining === 0 && !timerSyncing[key]) void controlRotationTimer(match, 'TICK', key);\n    }\n  }, [clockNow, matches, community, isOwner, timerSyncing]);
+  const canManageTournaments = isOwner || isAdmin;
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setClockNow(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (!community || !isOwner) return;
+    for (const match of matches) {
+      const rotation = match.rotationState;
+      if (!rotation || rotation.status !== 'ACTIVE' || rotation.timerPausedAt || !rotation.timerStartedAt) continue;
+      const remaining = Math.max(0, (rotation.durationSeconds ?? 600) * 1000 - (clockNow - new Date(rotation.timerStartedAt).getTime()));
+      const key = match.id + ':' + rotation.games.length;
+      if (remaining === 0 && !timerSyncing[key]) void controlRotationTimer(match, 'TICK', key);
+    }
+  }, [clockNow, matches, community, isOwner, timerSyncing]);
 
   function updatePlayer(index: number, value: string) {
     setPlayerNames((current) => current.map((player, playerIndex) => playerIndex === index ? value : player));
@@ -338,7 +360,8 @@ export default function App() {
         body: JSON.stringify({ title: matchTitle, memberIds: selectedMemberIds, playersPerTeam, createdByMemberId: currentMemberId, ownerToken, goalsToWin, durationMinutes }),
       });
       localStorage.setItem(`matchset-result:${result.match.id}`, result.resultToken);
-      setMatchTitle('');\n      setGoalsToWin(1); setDurationMinutes(10);
+      setMatchTitle('');
+      setGoalsToWin(1); setDurationMinutes(10);
       await loadCommunity(community.slug);
       setCommunityTab('matches');
       setNotice('Teams created and saved to community history.');
@@ -496,7 +519,8 @@ export default function App() {
           <div className="roster-heading"><span className="field-label">SELECT PLAYERS ({selectedMemberIds.length} SELECTED)</span><button type="button" className="text-button" onClick={() => setSelectedMemberIds(selectedMemberIds.length === members.length ? [] : members.map((member) => member.id))}>{selectedMemberIds.length === members.length ? 'Clear all' : 'Select all'}</button></div>
           <div className="roster-select">{members.map((member) => <label className="roster-option" key={member.id}><input type="checkbox" checked={selectedMemberIds.includes(member.id)} onChange={() => toggleMember(member.id)} disabled={member.id === currentMemberId} /><span>{member.name}</span></label>)}</div>
           <div className="form-bottom"><label className="size-label">PLAYERS PER TEAM<select value={playersPerTeam} onChange={(e) => setPlayersPerTeam(Number(e.target.value))}>{Array.from({ length: 19 }, (_, i) => i + 2).map((n) => <option key={n} value={n}>{n} players</option>)}</select></label><span className="count">{Math.ceil(selectedMemberIds.length / playersPerTeam)} TEAMS</span></div>
-          <div className="form-bottom"><label className="size-label">GOALS TO WIN<select value={goalsToWin} onChange={(e) => setGoalsToWin(Number(e.target.value))}>{[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n} goal{n === 1 ? '' : 's'}</option>)}</select></label><label className="size-label">TIME PER GAME<select value={durationMinutes} onChange={(e) => setDurationMinutes(Number(e.target.value))}>{[5, 10, 15, 20, 25, 30, 45, 60].map((n) => <option key={n} value={n}>{n} minutes</option>)}</select></label></div>\n          <p className="hint">Teams are balanced automatically. Each rotation game ends at the goal target or when its timer expires. Every selected player is assigned exactly once.</p>
+          <div className="form-bottom"><label className="size-label">GOALS TO WIN<select value={goalsToWin} onChange={(e) => setGoalsToWin(Number(e.target.value))}>{[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n} goal{n === 1 ? '' : 's'}</option>)}</select></label><label className="size-label">TIME PER GAME<select value={durationMinutes} onChange={(e) => setDurationMinutes(Number(e.target.value))}>{[5, 10, 15, 20, 25, 30, 45, 60].map((n) => <option key={n} value={n}>{n} minutes</option>)}</select></label></div>
+          <p className="hint">Teams are balanced automatically. Each rotation game ends at the goal target or when its timer expires. Every selected player is assigned exactly once.</p>
           <button className="primary-btn submit-button" disabled={loading || Math.ceil(selectedMemberIds.length / playersPerTeam) < 2}>{loading ? 'Saving…' : 'Create teams'} <span>↗</span></button>
         </form>
       </div>}
@@ -568,7 +592,8 @@ export default function App() {
                   {isOwner && resultToken && <div className="rotation-controls"><button className="record-win-btn draw-btn" disabled={loading || activeTeams.length !== 2} onClick={() => void recordRotationOutcome(match, 'DRAW')}>Declare draw</button></div>}
                 </div>
                 <div className="rotation-queue"><strong>WAITING QUEUE</strong><span>{waitingTeams.length ? waitingTeams.map((team) => 'Set ' + team.id).join(' · ') : 'No teams waiting — next rotation will bring teams back in.'}</span></div>
-                {rotation.goals && rotation.goals.length > 0 && <div className="rotation-goal-history"><strong>GOALS THIS GAME</strong>{rotation.goals.map((goal, index) => <p key={index}>Set {goal.teamId}: {goal.scorerName}{goal.assisterName ? ' · Assist: ' + goal.assisterName : ''}</p>)}</div>}\n                {rotation.games.length > 0 && <div className="rotation-last-game"><span>LAST RESULT</span><strong>{rotation.games[rotation.games.length - 1].outcome === 'DRAW' ? 'Draw' : 'Set ' + rotation.games[rotation.games.length - 1].winnerTeamId + ' won'}</strong>{isOwner && resultToken && <button className="text-button" disabled={loading} onClick={() => void undoRotationOutcome(match)}>Undo last result</button>}</div>}
+                {rotation.goals && rotation.goals.length > 0 && <div className="rotation-goal-history"><strong>GOALS THIS GAME</strong>{rotation.goals.map((goal, index) => <p key={index}>Set {goal.teamId}: {goal.scorerName}{goal.assisterName ? ' · Assist: ' + goal.assisterName : ''}</p>)}</div>}
+                {rotation.games.length > 0 && <div className="rotation-last-game"><span>LAST RESULT</span><strong>{rotation.games[rotation.games.length - 1].outcome === 'DRAW' ? 'Draw' : 'Set ' + rotation.games[rotation.games.length - 1].winnerTeamId + ' won'}</strong>{isOwner && resultToken && <button className="text-button" disabled={loading} onClick={() => void undoRotationOutcome(match)}>Undo last result</button>}</div>}
                 <details className="rotation-history"><summary>Game history ({rotation.games.length})</summary>{rotation.games.length === 0 ? <p className="hint">No games recorded yet.</p> : <ol>{rotation.games.map((game) => <li key={game.number}>Game {game.number}: Set {game.teamAId} {game.score?.[0] ?? '—'}–{game.score?.[1] ?? '—'} Set {game.teamBId} — {game.outcome === 'DRAW' ? 'Draw' : 'Set ' + game.winnerTeamId + ' won'}{game.goals?.length ? ' · ' + game.goals.map((goal) => goal.scorerName + (goal.assisterName ? ' (A: ' + goal.assisterName + ')' : '')).join(', ') : ''}</li>)}</ol>}</details>
                 {!isOwner && <p className="read-only-note">The organiser records results and controls rotation.</p>}
               </> : <div className="history-teams">{match.teams.map((team) => <div className={match.winningTeamId === team.id ? 'history-team winner' : 'history-team'} key={team.id}><div><b>TEAM {team.id}</b>{match.winningTeamId === team.id && <span>WINNER</span>}</div><p>{team.players.map((player) => player.name).join(' · ')}</p></div>)}</div>}
