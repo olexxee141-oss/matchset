@@ -632,7 +632,7 @@ export default function App() {
   }
   function openHome() {
     window.history.pushState({}, '', '/');
-    setPage('home'); setSession(null); setCommunity(null); setCommunityAccess('VIEWER'); setQuickTournamentOpen(false); setRecentCommunities(() => { try { return JSON.parse(localStorage.getItem('matchset-recent-communities') || '[]') as Community[]; } catch { return []; } }); setError(''); setNotice(''); setShowViewInput(false);
+    setPage('home'); setSession(null); setCommunity(null); setCommunityAccess('VIEWER'); setRecentCommunities(() => { try { return JSON.parse(localStorage.getItem('matchset-recent-communities') || '[]') as Community[]; } catch { return []; } }); setError(''); setNotice(''); setShowViewInput(false);
   }
 
   return <main className="shell">
